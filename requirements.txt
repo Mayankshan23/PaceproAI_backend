@@ -1,0 +1,12 @@
+opencv-python
+mediapipe
+numpy
+scipy
+anthropic
+fastapi
+uvicorn
+python-multipart
+pydantic
+openai
+google-genai
+python-dotenv

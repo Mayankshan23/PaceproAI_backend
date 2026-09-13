@@ -1,0 +1,125 @@
+{
+  "pipeline_status": "ok",
+  "views_requested": [
+    "front",
+    "side1",
+    "side2"
+  ],
+  "views_used": [
+    "front",
+    "side1",
+    "side2"
+  ],
+  "views_missing_or_failed": [],
+  "view_errors": {},
+  "final_measurements": {
+    "per_view_events": {
+      "front": {
+        "success": true,
+        "bfc": {
+          "frame": 66,
+          "foot": "right"
+        },
+        "ffc": {
+          "frame": 72,
+          "foot": "left"
+        },
+        "bowling_arm": "right",
+        "release_frame": 97
+      },
+      "side1": {
+        "success": true,
+        "bfc": {
+          "frame": 66,
+          "foot": "right"
+        },
+        "ffc": {
+          "frame": 72,
+          "foot": "left"
+        },
+        "bowling_arm": "right",
+        "release_frame": 97
+      },
+      "side2": {
+        "success": true,
+        "bfc": {
+          "frame": 66,
+          "foot": "right"
+        },
+        "ffc": {
+          "frame": 72,
+          "foot": "left"
+        },
+        "bowling_arm": "right",
+        "release_frame": 97
+      }
+    },
+    "bowling_arm": {
+      "value": "right",
+      "source": "combined(front+side1+side2)",
+      "confidence": "high",
+      "note": null
+    },
+    "view_fusion": {
+      "views_used": [
+        "front",
+        "side1",
+        "side2"
+      ],
+      "views_missing_or_failed": [],
+      "measurements": {
+        "trunk_lean_at_release": {
+          "value": 2.0,
+          "unit": "deg",
+          "source": "combined(front+side1+side2)",
+          "confidence": "high",
+          "note": "Views agreed within 8.0 deg (spread=0.0)."
+        },
+        "release_elbow_extension": {
+          "value": 150.9,
+          "unit": "deg",
+          "source": "combined(front+side1+side2)",
+          "confidence": "high",
+          "note": "Views agreed within 8.0 deg (spread=0.0)."
+        },
+        "arm_slot": {
+          "value": "side_arm",
+          "unit": null,
+          "source": "combined(front+side1+side2)",
+          "confidence": "high",
+          "note": "Views agreed."
+        },
+        "back_knee_flexion_at_bfc": {
+          "value": 169.7,
+          "unit": "deg",
+          "source": "combined(front+side1+side2)",
+          "confidence": "high",
+          "note": "Views agreed within 8.0 deg (spread=0.0)."
+        },
+        "front_knee_brace_change": {
+          "value": null,
+          "unit": null,
+          "source": null,
+          "confidence": "none",
+          "note": "No view produced a confident measurement for this metric."
+        },
+        "front_knee_angle_at_ffc": {
+          "value": null,
+          "unit": null,
+          "source": null,
+          "confidence": "none",
+          "note": "No view produced a confident measurement for this metric."
+        }
+      }
+    }
+  },
+  "llm_report": {
+    "_status": "unavailable",
+    "_error": "The 'anthropic' package is not installed. Run: pip install anthropic",
+    "summary": "LLM narration is unavailable right now, but the underlying measurements below were still calculated by the computer-vision pipeline.",
+    "strengths": [],
+    "technical_observations": [],
+    "possible_issues": [],
+    "recommendations": []
+  }
+}
