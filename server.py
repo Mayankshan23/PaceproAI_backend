@@ -18,15 +18,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import config
 from pipeline import PaceProPipeline
 from planner_service import PlannerService
 from database import db_manager
-from video_annotator import VideoAnnotator
-from temp_video_manager import temp_video_manager
 from strength_diagnostics import strength_engine
 
 app = FastAPI(
@@ -49,7 +47,6 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = str(BASE_DIR / "models" / "pose_landmarker_full.task")
 
 planner_service = PlannerService()
-video_annotator = VideoAnnotator()
 
 
 # =====================================================================
@@ -394,47 +391,12 @@ async def analyze_bowling_api(
                     calc_score -= 6
                 llm_report["overall_score"] = min(96, max(50, calc_score))
 
-        # Render temporary annotated videos with 3D skeleton & angle overlays
-        session_id = temp_video_manager.create_session()
-        annotated_videos = {}
-        per_view_raw = raw_result.get("per_view_raw", {})
-        per_view_pose = raw_result.get("per_view_pose", {})
-
-        for view_name in views_used:
-            input_path = video_paths.get(view_name)
-            pose_list = per_view_pose.get(view_name, [])
-            ev_data = per_view_raw.get(view_name, {})
-            out_video_path = temp_video_manager.get_output_path(session_id, view_name)
-
-            if input_path and pose_list:
-                try:
-                    success = video_annotator.annotate_view_video(
-                        input_video_path=input_path,
-                        output_video_path=out_video_path,
-                        pose_data_list=pose_list,
-                        view_name=view_name,
-                        events=ev_data,
-                        bowling_arm=bowling_arm_str
-                    )
-                    if success and os.path.exists(out_video_path):
-                        annotated_videos[view_name] = {
-                            "view": view_name,
-                            "session_id": session_id,
-                            "stream_url": f"/api/video/annotated/{session_id}/{view_name}",
-                            "download_url": f"/api/video/download/{session_id}/{view_name}",
-                            "filename": f"pacepro_{view_name}_annotated.mp4"
-                        }
-                except Exception as ann_err:
-                    print(f"[VideoAnnotator] Skipping annotation for {view_name}: {ann_err}")
-
         single_view_warning = fusion_payload.get("single_view_warning")
         overall_confidence_pct = fusion_payload.get("overall_confidence_pct", 38 if len(views_used) == 1 else 85)
         disagreement_detected = fusion_payload.get("disagreement_detected", False)
 
         final_res = {
             "pipeline_status": "success" if views_used else "no_usable_views",
-            "session_id": session_id,
-            "annotated_videos": annotated_videos,
             "views_requested": raw_result.get("views_requested", list(video_paths.keys())),
             "views_used": views_used,
             "views_missing_or_failed": views_missing,
@@ -460,10 +422,10 @@ async def analyze_bowling_api(
             "llm_report": llm_report
         }
 
-        # Auto-persist analysis record and history item to MongoDB (Explicitly do NOT persist video files or video URLs)
+        # Auto-persist analysis record and history item to MongoDB
         if db_manager.is_connected:
             uid = user_id or "default_athlete"
-            db_record = {k: v for k, v in final_res.items() if k not in ("annotated_videos", "session_id")}
+            db_record = {k: v for k, v in final_res.items()}
             db_record["user_id"] = uid
             db_manager.save_analysis_record(db_record, user_id=uid, max_retained=3)
             brace_val = formatted_measurements.get("front_knee_brace_change", {}).get("fused", "N/A")
@@ -477,36 +439,6 @@ async def analyze_bowling_api(
             }, user_id=uid, max_retained=3)
 
         return final_res
-
-
-# =====================================================================
-# TEMPORARY ANNOTATED SKELETON VIDEO STREAMING & DOWNLOAD
-# =====================================================================
-
-@app.get("/api/video/annotated/{session_id}/{view_name}")
-async def stream_annotated_video(session_id: str, view_name: str):
-    """Streams temporary annotated video for browser playback with seeking support."""
-    file_path = temp_video_manager.get_video_file(session_id, view_name)
-    if not file_path or not file_path.exists():
-        raise HTTPException(status_code=404, detail="Temporary annotated video not found or session expired.")
-    return FileResponse(
-        path=str(file_path),
-        media_type="video/mp4",
-        headers={"Accept-Ranges": "bytes"}
-    )
-
-
-@app.get("/api/video/download/{session_id}/{view_name}")
-async def download_annotated_video(session_id: str, view_name: str):
-    """Provides direct download of temporary annotated video."""
-    file_path = temp_video_manager.get_video_file(session_id, view_name)
-    if not file_path or not file_path.exists():
-        raise HTTPException(status_code=404, detail="Temporary annotated video not found or session expired.")
-    return FileResponse(
-        path=str(file_path),
-        media_type="video/mp4",
-        filename=f"pacepro_{view_name}_skeleton_analysis.mp4"
-    )
 
 
 
