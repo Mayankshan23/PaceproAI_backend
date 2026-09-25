@@ -10,3 +10,5 @@ pydantic
 openai
 google-genai
 python-dotenv
+pymongo
+certifi

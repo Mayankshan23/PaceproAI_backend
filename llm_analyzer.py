@@ -78,7 +78,7 @@ class LLMProviderWorker:
             client = openai.OpenAI(
                 api_key=self.api_key or "not-needed",
                 base_url=self.base_url,
-                timeout=8.0,
+                timeout=10.0,
             )
             messages = []
             if system_prompt:
@@ -93,6 +93,8 @@ class LLMProviderWorker:
             )
             choice = response.choices[0]
             content = (choice.message.content or "").strip()
+            if not content and hasattr(choice.message, 'reasoning_content') and choice.message.reasoning_content:
+                content = str(choice.message.reasoning_content).strip()
             if not content:
                 raise LLMUnavailableError("OpenAI provider returned empty text response.")
             return content
@@ -105,7 +107,7 @@ class LLMProviderWorker:
         if not self.api_key:
             raise LLMUnavailableError("No API key provided for Anthropic provider.")
         try:
-            client_kwargs = {"api_key": self.api_key, "timeout": 15.0}
+            client_kwargs = {"api_key": self.api_key, "timeout": 12.0}
             if self.base_url:
                 client_kwargs["base_url"] = self.base_url
             client = anthropic.Anthropic(**client_kwargs)
@@ -126,50 +128,33 @@ class LLMProviderWorker:
             raise LLMUnavailableError(f"Anthropic API call failed: {exc}") from exc
 
     def _call_gemini(self, system_prompt, user_prompt):
-        # If custom base_url or google-genai is unavailable, use official OpenAI-compatible endpoint
-        if self.base_url or not _GOOGLE_GENAI_AVAILABLE:
-            if not _OPENAI_AVAILABLE:
-                raise LLMUnavailableError("Neither 'google-genai' nor 'openai' package is installed.")
-            try:
-                base_url = self.base_url or "https://generativelanguage.googleapis.com/v1beta/openai/"
-                client = openai.OpenAI(api_key=self.api_key, base_url=base_url, timeout=12.0)
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": user_prompt})
-                response = client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                )
-                content = (response.choices[0].message.content or "").strip()
-                if not content:
-                    raise LLMUnavailableError("Gemini (OpenAI-compatible) returned empty response.")
-                return content
-            except Exception as exc:
-                raise LLMUnavailableError(f"Gemini (OpenAI-compatible) API call failed: {exc}") from exc
-
-        # Native google-genai client
+        if not _OPENAI_AVAILABLE:
+            raise LLMUnavailableError("The 'openai' package is required for Gemini integration.")
         try:
-            client = genai.Client(api_key=self.api_key)
-            call_config = genai_types.GenerateContentConfig(
-                temperature=self.temperature,
-                max_output_tokens=self.max_tokens,
-            )
+            base_url = self.base_url or "https://generativelanguage.googleapis.com/v1beta/openai/"
+            model_name = self.model or "gemini-3.6-flash"
+            if model_name in ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"):
+                model_name = "gemini-3.6-flash"
+
+            client = openai.OpenAI(api_key=self.api_key, base_url=base_url, timeout=12.0)
+            messages = []
             if system_prompt:
-                call_config.system_instruction = system_prompt
-            response = client.models.generate_content(
-                model=self.model,
-                contents=user_prompt,
-                config=call_config
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": user_prompt})
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
             )
-            text = (response.text or "").strip()
-            if not text:
-                raise LLMUnavailableError("Gemini provider returned empty response.")
-            return text
+            content = (response.choices[0].message.content or "").strip()
+            if not content and hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
+                content = str(response.choices[0].message.reasoning_content).strip()
+            if not content:
+                raise LLMUnavailableError("Gemini returned empty response.")
+            return content
         except Exception as exc:
-            raise LLMUnavailableError(f"Google Gemini API call failed: {exc}") from exc
+            raise LLMUnavailableError(f"Gemini API call failed: {exc}") from exc
 
 
 import time
@@ -307,14 +292,14 @@ class LLMClient:
         except Exception:
             pass
 
-        # Case 2: Markdown fenced block ```json ... ```
+        # Case 2: Markdown fenced block ```json ... ``` or ``` ... ```
         if "```" in cleaned:
             parts = cleaned.split("```")
             for part in parts:
                 p = part.strip()
                 if p.startswith("json"):
                     p = p[4:].strip()
-                if p.startswith("{") and p.endswith("}"):
+                if (p.startswith("{") and p.endswith("}")) or (p.startswith("[") and p.endswith("]")):
                     try:
                         return json.loads(p)
                     except Exception:
@@ -325,6 +310,16 @@ class LLMClient:
         last_brace = cleaned.rfind("}")
         if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
             json_candidate = cleaned[first_brace:last_brace + 1]
+            try:
+                return json.loads(json_candidate)
+            except Exception:
+                pass
+
+        # Case 4: Outer bracket substring match [ ... ]
+        first_bracket = cleaned.find("[")
+        last_bracket = cleaned.rfind("]")
+        if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+            json_candidate = cleaned[first_bracket:last_bracket + 1]
             try:
                 return json.loads(json_candidate)
             except Exception:
@@ -467,46 +462,44 @@ class SimpleBowlingLLMAnalyzer:
 
 
 class BowlingLLMAnalyzer:
-    """Turns FINAL fused biomechanical measurements into a structured
-    coaching report. Receives only already-computed numbers."""
+    """Turns FINAL fused biomechanical measurements into a structured,
+    highly encouraging, and constructive coaching report. Receives only already-computed numbers."""
 
     SYSTEM_PROMPT = (
-        "You are an elite cricket fast-bowling biomechanist and high-performance bowling coach.\n"
+        "You are an inspiring, elite cricket fast-bowling mentor and high-performance biomechanics coach.\n"
         "You will be given a JSON object of ALREADY-CALCULATED biomechanical measurements "
         "(angles in degrees, event frames, view-fusion results) from a bowler's delivery stride.\n"
         "\n"
-        "CRITICAL COACHING RULES:\n"
-        "1. These numeric values were measured by a computer-vision pose pipeline. Do NOT invent, "
-        "recalculate, or guess any numbers. Cite only the exact measured angles in your report.\n"
-        "2. Assess the kinetic chain in order: Back-Foot Contact (BFC) momentum -> Front-Foot Contact (FFC) "
-        "knee brace lockout -> Hip-Shoulder Separation delay -> Trunk alignment & lateral spine safety -> "
-        "Release elbow extension (ICC 15° legal limit check) -> Arm slot elevation.\n"
-        "3. Evaluate the lead knee brace: Front knee angle >= 165° (or flexion <= 15°) is a rigid locked fulcrum "
-        "that whips kinetic energy into release speed. Soft/flexing knee (<160°) dissipates force into muscles, "
-        "leaking 3-5 km/h.\n"
-        "4. Evaluate spinal alignment: Excessive lateral trunk tilt (>20°) creates dangerous shearing forces on "
-        "contralateral lumbar vertebrae (pars interarticularis risk). Upright/controlled drive is safe and fast.\n"
-        "5. Respond ONLY with a single valid JSON object, no markdown codeblocks, no preamble, matching this exact schema:\n"
+        "COACHING PHILOSOPHY & TONE GUIDELINES:\n"
+        "1. ENCOURAGING & POSITIVE: Speak directly to the bowler ('You', 'Your delivery') with high energy and optimism. "
+        "Never demotivate, criticize harshly, or frighten the athlete. Praise their athletic rhythm and dedication.\n"
+        "2. POSITIVE FRAMING OF LACKS: Frame every technical flaw as an exciting 'Pace Opportunity' or 'Energy Efficiency Boost' "
+        "(e.g., 'You have a fantastic opportunity to unlock an easy +3–5 km/h extra pace simply by firming up your lead knee brace at landing!').\n"
+        "3. NO SCARY OR CLINICAL JARGON: Never use alarming medical terms like 'stress fracture risk', 'vertebral damage', "
+        "or 'illegal action'. Instead, explain spinal and joint alignment positively: 'Staying upright through delivery keeps your back feeling fresh, strong, and ready for long match spells.'\n"
+        "4. ACCURATE TO MEASUREMENTS: These numbers came from computer vision. Do NOT invent, recalculate, or guess any angles. "
+        "Cite the exact calculated numbers naturally as evidence of their strengths and growth potential.\n"
+        "5. Respond ONLY with a single valid JSON object, no markdown fences, matching this exact schema:\n"
         "{\n"
         '  "overall_score": 88,\n'
-        '  "grade": "A- (Strong Kinetic Chain)",\n'
-        '  "summary": "2-3 sentence executive biomechanical summary.",\n'
-        '  "priority_improvement": "Single most critical mechanical cue for immediate speed & safety.",\n'
+        '  "grade": "A- (Strong Kinetic Foundation)",\n'
+        '  "summary": "2-3 sentence inspiring executive summary highlighting their athletic potential and core strengths.",\n'
+        '  "priority_improvement": "Single most rewarding positive mechanical cue to unlock extra pace and effortless carry.",\n'
         '  "what_you_are_doing_well": [\n'
-        '    "Detailed strength citing exact angle 1...",\n'
-        '    "Detailed strength citing exact angle 2..."\n'
+        '    "Praise strength citing exact angle 1 with positive kinetic benefit...",\n'
+        '    "Praise strength citing exact angle 2 with athletic flow impact..."\n'
         '  ],\n'
         '  "technical_issues": [\n'
-        '    "Inefficiency with ball speed leak impact or joint risk...",\n'
-        '    "Technical flaw with kinetic breakdown explanation..."\n'
+        '    "Positive velocity opportunity explaining how a slight refinement adds speed...",\n'
+        '    "Constructive kinetic alignment cue to make bowling feel effortless..."\n'
         '  ],\n'
         '  "coaching_recommendations": [\n'
-        '    "Specific drill 1 with execution cue...",\n'
-        '    "Specific drill 2 with protocol..."\n'
+        '    "Fun, actionable drill 1 with clear execution cue...",\n'
+        '    "Actionable drill 2 with simple protocol..."\n'
         '  ],\n'
         '  "questions_to_discuss_with_coach": [\n'
-        '    "Thought-provoking biomechanical question 1...",\n'
-        '    "Technical inquiry for the bowler..."\n'
+        '    "Inspiring question for the bowler and their coach 1...",\n'
+        '    "Constructive inquiry on match-day rhythm..."\n'
         '  ]\n'
         "}"
     )

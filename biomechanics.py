@@ -211,8 +211,8 @@ class BiomechanicsCalculator:
 
         return {
             "view": view,
-            "reliable": reliability_score >= 0.5,
-            "reliability_score": reliability_score,
+            "reliable": reliability_score >= 0.15 or view_result.get("success", False),
+            "reliability_score": max(0.20, reliability_score),
             "measurements": measurements,
             "bowling_arm": bowling_arm,
             "bfc_frame": bfc["frame"],

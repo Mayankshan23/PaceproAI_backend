@@ -54,7 +54,7 @@ API_MODEL_NAME = (
 )
 
 LLM_MODEL = API_MODEL_NAME
-LLM_MAX_TOKENS = 2500
+LLM_MAX_TOKENS = 4500
 LLM_TEMPERATURE = 0.4  # low temperature: analysis, not creative writing
 
 # Backward compatibility alias

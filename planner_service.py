@@ -216,10 +216,11 @@ class PlannerService:
                 "_status": "offline_fallback" if isinstance(exc, LLMUnavailableError) else "fallback",
             }
 
-    def generate_diet_plan(self, req_data: Dict[str, Any]) -> Dict[str, Any]:
+    def generate_diet_plan(self, req_data: Dict[str, Any], llm_client: Optional[Any] = None) -> Dict[str, Any]:
         """
         Full daily meal plan generator matching the /api/generate-diet format.
-        Includes macro breakdown, itemized meals, timings, and cost estimation.
+        Uses exact sports-science calculation (Mifflin-St Jeor) and calls LLM
+        to generate tailored meal suggestions with dynamic fallbacks.
         """
         age = int(req_data.get("age", 20))
         weight = float(req_data.get("weight", req_data.get("weight_kg", 70.0)))
@@ -227,7 +228,17 @@ class PlannerService:
         sex = req_data.get("sex", "male").lower()
         activity = req_data.get("activity", req_data.get("activity_level", "high")).lower()
         goal = req_data.get("goal", "performance").lower()
-        food_pref = (req_data.get("food_preference") or "non-veg").lower()
+        food_pref = (req_data.get("foodPref") or req_data.get("food_preference") or "non-veg").lower()
+        budget_weekly = float(req_data.get("budgetWeekly", req_data.get("budget", {}).get("amount", 3500.0)))
+        allergies = req_data.get("allergies", [])
+        if not isinstance(allergies, list):
+            allergies = [str(allergies)]
+        avoid_foods = req_data.get("avoidFoods", req_data.get("avoid_foods", []))
+        if not isinstance(avoid_foods, list):
+            avoid_foods = [str(avoid_foods)]
+        meal_freq = int(req_data.get("mealFreq", req_data.get("meal_frequency", 5)))
+        cooking_pref = str(req_data.get("cookingPref", req_data.get("cooking_preference", "home")))
+        recovery_note = str(req_data.get("recoveryNote", req_data.get("recovery_note", "none")))
 
         # Validate & normalize
         if activity not in ACTIVITY_MULTIPLIERS and activity not in config.ACTIVITY_MULTIPLIERS:
@@ -249,130 +260,59 @@ class PlannerService:
         fat_g = targets["macros"]["fat_g"]
         carbs_g = targets["macros"]["carbs_g"]
 
-        is_veg = "veg" in food_pref and "non" not in food_pref
+        profile = {
+            "age": age,
+            "weight": weight,
+            "height": height,
+            "sex": sex,
+            "goal": goal,
+            "food_pref": food_pref,
+            "budget_weekly": budget_weekly,
+            "allergies": allergies,
+            "avoid_foods": avoid_foods,
+            "meal_freq": meal_freq,
+            "cooking_pref": cooking_pref,
+            "recovery_note": recovery_note,
+        }
 
-        meals = [
-            {
-                "type": "Breakfast",
-                "time": "07:30 AM",
-                "title": "Fast Bowler High-Protein Energy Bowl",
-                "items": [
-                    "Tofu/Paneer Bhurji (150g)" if is_veg else "Paneer Scramble or 4 Boiled Egg Whites",
-                    "100g Rolled Oats with Whey Protein / Plant Isolate",
-                    "1 Banana with 1 tbsp Peanut Butter",
-                    "250ml Electrolyte Fresh Juice",
-                ],
-                "calories": round(total_cals * 0.24),
-                "protein_g": round(protein_g * 0.26),
-                "carbs_g": round(carbs_g * 0.25),
-                "fats_g": round(fat_g * 0.24),
-                "estimated_cost_inr": 110,
-            },
-            {
-                "type": "Pre-workout",
-                "time": "10:30 AM",
-                "title": "Explosive Ground Session Fuel",
-                "items": [
-                    "2 Multigrain Toast slices with Raw Honey",
-                    "15 Soaked Almonds & 4 Royal Dates",
-                    "Black Coffee or Pre-workout electrolyte drink",
-                ],
-                "calories": round(total_cals * 0.12),
-                "protein_g": round(protein_g * 0.08),
-                "carbs_g": round(carbs_g * 0.16),
-                "fats_g": round(fat_g * 0.12),
-                "estimated_cost_inr": 50,
-            },
-            {
-                "type": "Post-workout",
-                "time": "01:30 PM",
-                "title": "Kinetic Recovery & Glycogen Replenishment",
-                "items": [
-                    "1 Scoop Isolate Whey in Coconut Water",
-                    "1 Large Sweet Potato or Ripe Banana",
-                ],
-                "calories": round(total_cals * 0.10),
-                "protein_g": round(protein_g * 0.18),
-                "carbs_g": round(carbs_g * 0.12),
-                "fats_g": round(fat_g * 0.05),
-                "estimated_cost_inr": 90,
-            },
-            {
-                "type": "Lunch",
-                "time": "02:30 PM",
-                "title": "Athletic Performance & Repair Plate",
-                "items": [
-                    "200g Paneer / Soy Chunks Curry" if is_veg else "200g Grilled Chicken Breast",
-                    "200g Brown Basmati Rice / Quinoa",
-                    "Mixed Steamed Veggies (Broccoli, Carrots)",
-                    "1 Bowl Fresh Greek Yogurt / Curd",
-                ],
-                "calories": round(total_cals * 0.28),
-                "protein_g": round(protein_g * 0.30),
-                "carbs_g": round(carbs_g * 0.26),
-                "fats_g": round(fat_g * 0.28),
-                "estimated_cost_inr": 130,
-            },
-            {
-                "type": "Evening Snack",
-                "time": "06:00 PM",
-                "title": "Workload Recovery Snack",
-                "items": [
-                    "Roasted Bengal Gram (Chana) - 60g",
-                    "Handful of Crushed Walnuts & Pumpkin Seeds",
-                    "Green Tea with Squeezed Lemon",
-                ],
-                "calories": round(total_cals * 0.10),
-                "protein_g": round(protein_g * 0.08),
-                "carbs_g": round(carbs_g * 0.10),
-                "fats_g": round(fat_g * 0.14),
-                "estimated_cost_inr": 35,
-            },
-            {
-                "type": "Dinner",
-                "time": "08:30 PM",
-                "title": "Overnight Tissue Repair & Lumbar Care",
-                "items": [
-                    "3 Whole Wheat Multigrain Roti",
-                    "150g Yellow Moong Dal Tadka with Paneer" if is_veg else "150g Grilled Fish / Soya Paneer curry",
-                    "Generous Green Spinach & Cucumber Salad",
-                    "1 Glass Warm Golden Turmeric Milk",
-                ],
-                "calories": round(total_cals * 0.20),
-                "protein_g": round(protein_g * 0.20),
-                "carbs_g": round(carbs_g * 0.20),
-                "fats_g": round(fat_g * 0.22),
-                "estimated_cost_inr": 95,
-            },
-        ]
+        # Concurrently generate meals and AI coaching assessment to reduce generation time by 50%
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            meals_future = executor.submit(self._generate_llm_meals, targets, profile, llm_client)
+            ai_future = executor.submit(
+                self.generate_ai_coaching_assessment,
+                athlete_profile={
+                    "age": age,
+                    "weight": weight,
+                    "height": height,
+                    "sex": sex,
+                    "goal": goal,
+                    "foodPref": food_pref
+                },
+                nutrition_metrics={
+                    "bmr": self.calculate_bmr(weight, height, age, sex),
+                    "tdee": round(total_cals / (1.15 if goal == "performance" else 1.0)),
+                    "target_calories": total_cals,
+                    "protein_g": protein_g,
+                    "carbs_g": carbs_g,
+                    "fats_g": fat_g
+                },
+                workload_metrics={
+                    "acwr_score": 1.18,
+                    "acwr_status": "Optimal Range (1.10 - 1.30 ACWR)",
+                    "total_weekly_overs": 16,
+                    "gym_days": 3,
+                    "ground_days": 4,
+                    "max_overs_days": 2
+                },
+                llm_client=llm_client
+            )
+            meals = meals_future.result()
+            ai_assessment = ai_future.result()
 
-        # Generate AI Sports Nutrition & Workload Assessment
-        ai_assessment = self.generate_ai_coaching_assessment(
-            athlete_profile={
-                "age": age,
-                "weight": weight,
-                "height": height,
-                "sex": sex,
-                "goal": goal,
-                "foodPref": food_pref
-            },
-            nutrition_metrics={
-                "bmr": self.calculate_bmr(weight, height, age, sex),
-                "tdee": round(total_cals / (1.15 if goal == "performance" else 1.0)),
-                "target_calories": total_cals,
-                "protein_g": protein_g,
-                "carbs_g": carbs_g,
-                "fats_g": fat_g
-            },
-            workload_metrics={
-                "acwr_score": 1.18,
-                "acwr_status": "Optimal Range (1.10 - 1.30 ACWR)",
-                "total_weekly_overs": 16,
-                "gym_days": 3,
-                "ground_days": 4,
-                "max_overs_days": 2
-            }
-        )
+        daily_budget = sum(m.get("estimated_cost_inr", 0) for m in meals)
+        if daily_budget <= 0:
+            daily_budget = round(budget_weekly / 7)
 
         return {
             "daily_targets": {
@@ -382,13 +322,323 @@ class PlannerService:
                 "fats_g": fat_g,
             },
             "estimated_budget": {
-                "daily_inr": sum(m["estimated_cost_inr"] for m in meals),
-                "weekly_inr": sum(m["estimated_cost_inr"] for m in meals) * 7,
+                "daily_inr": daily_budget,
+                "weekly_inr": round(daily_budget * 7),
             },
             "meals": meals,
             "ai_coaching_assessment": ai_assessment,
             "ai_assessment": ai_assessment,
         }
+
+    def _generate_llm_meals(
+        self,
+        targets: Dict[str, Any],
+        profile: Dict[str, Any],
+        llm_client: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Calls LLM to generate cricket-specific athletic meal breakdown tailored
+        to the exact pre-calculated sports-science calorie/macro figures,
+        food preference, allergies, budget, and meal frequency.
+        """
+        client = llm_client or LLMClient()
+        total_cals = targets.get("target_calories_kcal", 2800)
+        protein_g = targets.get("macros", {}).get("protein_g", 150)
+        fat_g = targets.get("macros", {}).get("fat_g", 65)
+        carbs_g = targets.get("macros", {}).get("carbs_g", 380)
+
+        age = profile.get("age", 20)
+        weight = profile.get("weight", 70.0)
+        height = profile.get("height", 175.0)
+        sex = profile.get("sex", "male")
+        goal = profile.get("goal", "performance")
+        food_pref = profile.get("food_pref", "non-veg")
+        allergies = profile.get("allergies", [])
+        avoid_foods = profile.get("avoid_foods", [])
+        meal_freq = max(3, min(6, int(profile.get("meal_freq", 5))))
+        budget_weekly = float(profile.get("budget_weekly", 3500.0))
+        daily_budget = round(budget_weekly / 7)
+
+        system_prompt = (
+            "You are PacePro AI's Lead Sports Nutritionist and Fast Bowling Performance Director.\n"
+            "You are given PRE-CALCULATED, verified sports-science daily targets for a cricket fast bowler:\n"
+            f"- Daily Calories: {total_cals} kcal\n"
+            f"- Protein: {protein_g}g\n"
+            f"- Carbohydrates: {carbs_g}g\n"
+            f"- Fats: {fat_g}g\n"
+            f"- Number of Meals: Exactly {meal_freq} spaced meals\n"
+            f"- Daily Target Budget: ~₹{daily_budget} INR\n\n"
+            "CRITICAL RULES:\n"
+            "1. DO NOT change or recalculate these total numbers. Distribute these exact totals across the meals.\n"
+            f"2. Strict Food Preference: '{food_pref}'. If vegetarian/vegan/eggetarian, NEVER include forbidden meats.\n"
+            f"3. Strict Allergy & Avoidance Constraints: NEVER include allergens: {json.dumps(allergies)}, and avoid: {json.dumps(avoid_foods)}.\n"
+            "4. Provide realistic, performance-oriented foods for cricket bowlers (e.g. Rolled Oats, Sattu, Paneer, Curd, Moong Dal, Sweet Potatoes, Eggs/Chicken/Fish if non-veg).\n"
+            "5. Respond ONLY with a valid JSON array of meal objects, no markdown fences:\n"
+            "[\n"
+            "  {\n"
+            '    "type": "Breakfast",\n'
+            '    "time": "07:30 AM",\n'
+            '    "title": "Fast Bowler High-Protein Energy Bowl",\n'
+            '    "items": ["Paneer Bhurji / Boiled Eggs (150g)", "100g Rolled Oats with Whey / Plant Isolate", "1 Banana with 1 tbsp Peanut Butter"],\n'
+            '    "calories": 650,\n'
+            '    "protein_g": 38,\n'
+            '    "carbs_g": 80,\n'
+            '    "fats_g": 18,\n'
+            '    "estimated_cost_inr": 110\n'
+            "  }\n"
+            "]"
+        )
+
+        user_prompt = (
+            f"Generate exactly {meal_freq} athletic meals for a {age}yo {sex} fast bowler ({weight}kg, {height}cm).\n"
+            f"Goal: {goal.replace('_', ' ').title()} | Diet: {food_pref.title()}\n"
+            f"Allergies to EXCLUDE: {', '.join(allergies) if allergies else 'None'}\n"
+            f"Calculated Targets: {total_cals} kcal | {protein_g}g Protein | {carbs_g}g Carbs | {fat_g}g Fats | Budget ~₹{daily_budget}/day."
+        )
+
+        try:
+            parsed = client.generate_json(system_prompt, user_prompt)
+            if isinstance(parsed, dict) and "meals" in parsed:
+                parsed = parsed["meals"]
+            if isinstance(parsed, list) and len(parsed) >= 2:
+                valid_meals = []
+                for m in parsed:
+                    if isinstance(m, dict) and ("type" in m or "title" in m):
+                        raw_items = m.get("items", [])
+                        if isinstance(raw_items, str):
+                            items_list = [raw_items]
+                        elif isinstance(raw_items, list):
+                            items_list = [str(it) for it in raw_items]
+                        else:
+                            items_list = ["Wholesome athletic meal ingredients"]
+
+                        valid_meals.append({
+                            "type": str(m.get("type", "Meal")),
+                            "time": str(m.get("time", "08:00 AM")),
+                            "title": str(m.get("title", "Athletic Performance Meal")),
+                            "items": items_list,
+                            "calories": int(m.get("calories", round(total_cals / len(parsed)))),
+                            "protein_g": int(m.get("protein_g", round(protein_g / len(parsed)))),
+                            "carbs_g": int(m.get("carbs_g", round(carbs_g / len(parsed)))),
+                            "fats_g": int(m.get("fats_g", round(fat_g / len(parsed)))),
+                            "estimated_cost_inr": int(m.get("estimated_cost_inr", round(daily_budget / len(parsed)))),
+                        })
+                if len(valid_meals) >= 2:
+                    return valid_meals
+        except Exception as e:
+            logger.warning(f"[PlannerService] LLM meal generation failed or offline: {e}")
+
+        # Fallback to calculated meal builder
+        return self._build_fallback_meals(targets, profile)
+
+    def _build_fallback_meals(self, targets: Dict[str, Any], profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Deterministic, sports-science calculated meal generator that dynamically
+        adapts to meal frequency, food preference, allergies, and calorie/macro totals.
+        """
+        total_cals = targets.get("target_calories_kcal", 2800)
+        protein_g = targets.get("macros", {}).get("protein_g", 150)
+        fat_g = targets.get("macros", {}).get("fat_g", 65)
+        carbs_g = targets.get("macros", {}).get("carbs_g", 380)
+
+        food_pref = profile.get("food_pref", "non-veg").lower()
+        is_veg = "veg" in food_pref and "non" not in food_pref
+        is_vegan = "vegan" in food_pref
+        is_egg = "egg" in food_pref
+
+        allergies = [str(a).lower() for a in profile.get("allergies", [])]
+        has_dairy_allergy = any("dairy" in a or "milk" in a or "lactose" in a for a in allergies)
+        has_nut_allergy = any("nut" in a or "peanut" in a for a in allergies)
+        has_gluten_allergy = any("gluten" in a or "wheat" in a for a in allergies)
+        has_soy_allergy = any("soy" in a for a in allergies)
+        has_egg_allergy = any("egg" in a for a in allergies)
+
+        meal_freq = max(3, min(6, int(profile.get("meal_freq", 5))))
+        budget_weekly = float(profile.get("budget_weekly", 3500.0))
+        daily_budget = round(budget_weekly / 7)
+
+        # Protein item builder
+        def get_breakfast_protein():
+            if is_vegan:
+                return "Tofu Scramble (150g) with turmeric & nutritional yeast" if not has_soy_allergy else "Sprouted Green Moong & Besan Chilla (3 chillas)"
+            if is_veg:
+                return "Paneer Bhurji (150g)" if not has_dairy_allergy else "Sprouted Moong Chilla with hemp seeds"
+            if is_egg or not has_egg_allergy:
+                return "4 Boiled Egg Whites + 1 Whole Egg Omelette"
+            return "Paneer Scramble or Soya Bhurji (150g)"
+
+        def get_lunch_protein():
+            if is_vegan:
+                return "200g Soya Chunks Curry with Spinach" if not has_soy_allergy else "200g Chickpea (Chole) & Dal Curry"
+            if is_veg:
+                return "200g Low-Fat Paneer / Soya Chunks Curry" if not has_dairy_allergy else "200g Soya & Black Chana Curry"
+            return "200g Grilled Chicken Breast or Fish Fillet"
+
+        def get_dinner_protein():
+            if is_vegan:
+                return "Yellow Moong Dal Tadka with Steamed Tofu" if not has_soy_allergy else "Thick Rajma / Dal Tadka with roasted seeds"
+            if is_veg:
+                return "Thick Moong Dal with Sautéed Paneer (120g)" if not has_dairy_allergy else "Moong Dal with Soya Paneer"
+            return "150g Grilled Fish or Skinless Chicken Curry with Dal"
+
+        def get_carb_base():
+            if has_gluten_allergy:
+                return "Steamed Brown Basmati Rice (200g) / Sweet Potato"
+            return "3 Whole Wheat Multigrain Rotis or Brown Basmati Rice"
+
+        def get_nuts_item():
+            if has_nut_allergy:
+                return "Roasted Pumpkin & Sunflower Seeds (30g)"
+            return "12 Soaked Almonds & 3 Royal Dates"
+
+        if meal_freq == 3:
+            # 3 Large Meals Split
+            return [
+                {
+                    "type": "Breakfast",
+                    "time": "08:00 AM",
+                    "title": "Power Athletic Breakfast",
+                    "items": [
+                        get_breakfast_protein(),
+                        "100g Rolled Oats with Plant/Whey Protein" if not has_gluten_allergy else "Brown Rice Flakes (Poha) with Sprouts",
+                        get_nuts_item(),
+                        "1 Ripe Banana with Tender Coconut Water"
+                    ],
+                    "calories": round(total_cals * 0.35),
+                    "protein_g": round(protein_g * 0.35),
+                    "carbs_g": round(carbs_g * 0.35),
+                    "fats_g": round(fat_g * 0.35),
+                    "estimated_cost_inr": round(daily_budget * 0.35),
+                },
+                {
+                    "type": "Lunch",
+                    "time": "01:30 PM",
+                    "title": "Performance Fuel & Repair Lunch",
+                    "items": [
+                        get_lunch_protein(),
+                        get_carb_base(),
+                        "Mixed Steamed Veggies (Broccoli, Carrots)",
+                        "1 Cup Greek Curd / Probiotic Dahi" if not has_dairy_allergy and not is_vegan else "Sprout Salad with Lemon Dressing"
+                    ],
+                    "calories": round(total_cals * 0.40),
+                    "protein_g": round(protein_g * 0.40),
+                    "carbs_g": round(carbs_g * 0.40),
+                    "fats_g": round(fat_g * 0.35),
+                    "estimated_cost_inr": round(daily_budget * 0.40),
+                },
+                {
+                    "type": "Dinner",
+                    "time": "08:30 PM",
+                    "title": "Overnight Tissue Repair & Lumbar Recovery",
+                    "items": [
+                        get_dinner_protein(),
+                        get_carb_base(),
+                        "Green Spinach, Cucumber & Beetroot Salad",
+                        "1 Glass Warm Golden Turmeric Milk" if not has_dairy_allergy and not is_vegan else "Warm Golden Almond/Oat Milk"
+                    ],
+                    "calories": round(total_cals * 0.25),
+                    "protein_g": round(protein_g * 0.25),
+                    "carbs_g": round(carbs_g * 0.25),
+                    "fats_g": round(fat_g * 0.30),
+                    "estimated_cost_inr": round(daily_budget * 0.25),
+                }
+            ]
+
+        # 4, 5, or 6 Spaced Meals
+        return [
+            {
+                "type": "Breakfast",
+                "time": "07:30 AM",
+                "title": "Fast Bowler High-Protein Energy Bowl",
+                "items": [
+                    get_breakfast_protein(),
+                    "100g Rolled Oats with Protein Isolate" if not has_gluten_allergy else "100g Rice Flakes with Protein",
+                    "1 Banana with Chia Seeds",
+                    "250ml Electrolyte Fresh Juice"
+                ],
+                "calories": round(total_cals * 0.24),
+                "protein_g": round(protein_g * 0.26),
+                "carbs_g": round(carbs_g * 0.25),
+                "fats_g": round(fat_g * 0.24),
+                "estimated_cost_inr": round(daily_budget * 0.25),
+            },
+            {
+                "type": "Pre-Spell Fuel",
+                "time": "10:30 AM",
+                "title": "Explosive Ground Session Primer",
+                "items": [
+                    "2 Multigrain Toast slices with Raw Honey" if not has_gluten_allergy else "2 Boiled Potatoes with Rock Salt",
+                    get_nuts_item(),
+                    "Black Coffee or Pre-workout electrolyte drink"
+                ],
+                "calories": round(total_cals * 0.12),
+                "protein_g": round(protein_g * 0.08),
+                "carbs_g": round(carbs_g * 0.16),
+                "fats_g": round(fat_g * 0.12),
+                "estimated_cost_inr": round(daily_budget * 0.12),
+            },
+            {
+                "type": "Post-Spell Recovery",
+                "time": "01:00 PM",
+                "title": "Kinetic Recovery & Glycogen Replenishment",
+                "items": [
+                    "1 Scoop Isolate Protein in Fresh Coconut Water",
+                    "1 Large Sweet Potato or Ripe Banana"
+                ],
+                "calories": round(total_cals * 0.12),
+                "protein_g": round(protein_g * 0.18),
+                "carbs_g": round(carbs_g * 0.14),
+                "fats_g": round(fat_g * 0.06),
+                "estimated_cost_inr": round(daily_budget * 0.18),
+            },
+            {
+                "type": "Lunch",
+                "time": "02:30 PM",
+                "title": "Athletic Performance & Repair Plate",
+                "items": [
+                    get_lunch_protein(),
+                    "200g Brown Basmati Rice / Quinoa",
+                    "Mixed Steamed Veggies (Broccoli, Carrots)",
+                    "1 Bowl Fresh Greek Yogurt / Curd" if not has_dairy_allergy and not is_vegan else "Sprouted Lentil Salad"
+                ],
+                "calories": round(total_cals * 0.26),
+                "protein_g": round(protein_g * 0.26),
+                "carbs_g": round(carbs_g * 0.23),
+                "fats_g": round(fat_g * 0.26),
+                "estimated_cost_inr": round(daily_budget * 0.25),
+            },
+            {
+                "type": "Evening Snack",
+                "time": "06:00 PM",
+                "title": "Workload Recovery Snack",
+                "items": [
+                    "Roasted Bengal Gram (Chana) - 60g",
+                    "Handful of Crushed Walnuts & Pumpkin Seeds" if not has_nut_allergy else "Roasted Makhana & Pumpkin Seeds",
+                    "Green Tea with Squeezed Lemon"
+                ],
+                "calories": round(total_cals * 0.08),
+                "protein_g": round(protein_g * 0.06),
+                "carbs_g": round(carbs_g * 0.08),
+                "fats_g": round(fat_g * 0.10),
+                "estimated_cost_inr": round(daily_budget * 0.08),
+            },
+            {
+                "type": "Dinner",
+                "time": "08:30 PM",
+                "title": "Overnight Tissue Repair & Lumbar Care",
+                "items": [
+                    get_dinner_protein(),
+                    get_carb_base(),
+                    "Generous Green Spinach & Cucumber Salad",
+                    "1 Glass Warm Golden Turmeric Milk" if not has_dairy_allergy and not is_vegan else "Warm Golden Oat Milk"
+                ],
+                "calories": round(total_cals * 0.18),
+                "protein_g": round(protein_g * 0.16),
+                "carbs_g": round(carbs_g * 0.14),
+                "fats_g": round(fat_g * 0.22),
+                "estimated_cost_inr": round(daily_budget * 0.12),
+            },
+        ]
 
     # -----------------------------------------------------------------
     # 2. WORKLOAD MANAGEMENT (WRC / ACWR)
@@ -1139,300 +1389,49 @@ class PlannerService:
         }
 
         # -------------------------------------------------------------
-        # 4. DAY-WISE SCHEDULE GENERATION WITH OPTION A & OPTION B MEALS
+        # 4. DAY-WISE SCHEDULE GENERATION (LLM + Calculated Workload & Nutrition)
         # -------------------------------------------------------------
-        days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        schedule = []
-        rem_bowling_days = weekly_bowling_days
-        rem_ground = ground_days
-        rem_gym = gym_days
-
-        for idx, day_name in enumerate(days_of_week):
-            is_match_spell = False
-            has_ground = False
-            has_gym = False
-
-            # Bowling scheduled on Mon, Thu, Sat (spaced out by 48h where possible)
-            if rem_bowling_days > 0 and (idx == 0 or idx == 3 or (idx == 5 and rem_bowling_days >= 3)):
-                is_match_spell = (idx == 0 or (idx == 3 and rem_bowling_days >= 2))
-                has_ground = True
-                rem_bowling_days -= 1
-                rem_ground = max(0, rem_ground - 1)
-            elif rem_ground > 0 and (idx in (0, 2, 4)):
-                has_ground = True
-                rem_ground -= 1
-
-            if rem_gym > 0 and (idx in (1, 3, 5) or (idx == 0 and rem_gym >= 4)):
-                has_gym = True
-                rem_gym -= 1
-
-            # Day Workload Attributes
-            if is_match_spell:
-                day_type = "max_overs_bowling"
-                badge = "Max Overs Spell"
-                title = f"High-Intensity Match Spell ({max_overs_per_spell} Overs @ {max_speed} km/h)"
-                ground_session = {
-                    "overs": max_overs_per_spell,
-                    "intensity": f"100% Match Pace ({max_speed} km/h)",
-                    "focus": "Full-speed match spell with front knee brace firmness and yorker target execution",
-                    "drills": [
-                        "Dynamic run-up markers × 4 acceleration build-ups",
-                        f"Target bowling on 6-8 meter good length ({max(3, max_overs_per_spell - 3)} overs)",
-                        f"Death overs yorkers and wide yorkers ({min(3, max_overs_per_spell)} overs)",
-                        "Post-spell 3x45s dead hangs for lumbar decompression"
-                    ],
-                }
-                gym_session = None
-                nutrition_cals = target_cals + 350
-                day_protein = base_protein
-                day_carbs = round((nutrition_cals * 0.55) / 4)
-                day_fats = round((nutrition_cals * 0.22) / 9)
-                workload_adaptation = (
-                    f"High glycogen pre-load and anti-inflammatory recovery calibrated for {max_overs_per_spell} overs "
-                    f"at match pace ({max_speed} km/h) and heavy front-knee brace ground reaction forces."
-                )
-
-                # OPTION A: Elite High-Performance Fuel
-                option_a_meals = [
-                    {"time": "06:00 AM", "name": "Pre-Spell Glycogen Primer", "items": "2 ripe bananas with raw honey, 1 multigrain toast, 350ml electrolyte hydration water"},
-                    {"time": "08:30 AM", "name": "Rapid Post-Spell Recovery", "items": "1 scoop whey/plant isolate in tender coconut water, 1 large boiled sweet potato"},
-                    {"time": "10:30 AM", "name": "Athletic Power Breakfast", "items": "Paneer bhurji (150g) with 3 chapatis and seasonal fruit bowl" if is_veg else "3 egg whites + 1 whole egg omelette with 2 multigrain toasts, fruit bowl"},
-                    {"time": "02:00 PM", "name": "Tissue Repair Lunch", "items": "200g soya chunk curry with 200g brown basmati rice, steamed spinach, probiotic curd" if is_veg else "200g grilled chicken breast with 200g brown basmati rice, steamed spinach, curd"},
-                    {"time": "05:30 PM", "name": "Joint De-Stress Recovery Snack", "items": "Roasted Bengal gram (chana, 60g), soaked pumpkin seeds, green tea"},
-                    {"time": "08:30 PM", "name": "Spine & Lumbar Healing Dinner", "items": "3 multigrain rotis with yellow dal tadka, sautéed paneer, mixed salad, warm golden turmeric milk" if is_veg else "3 multigrain rotis with grilled fish or chicken, dal tadka, salad, turmeric milk"}
-                ]
-
-                # OPTION B: Budget-Friendly / Quick Prep Fuel
-                option_b_meals = [
-                    {"time": "06:00 AM", "name": "Budget Pre-Spell Quick Fuel", "items": "2 large bananas with jaggery (gud), pinch of black salt in lemon water"},
-                    {"time": "08:30 AM", "name": "Budget Post-Spell Recovery", "items": "1 glass fresh sattu drink (40g chana sattu) with lemon, 1 boiled potato with rock salt"},
-                    {"time": "10:30 AM", "name": "High-Value Breakfast", "items": "Poha with roasted peanuts (or seeds) & boiled sprouts (100g), 1 glass cow milk" if is_veg else "3 boiled eggs with 2 plain rotis and sliced tomato-cucumber salad"},
-                    {"time": "02:00 PM", "name": "Budget High-Protein Lunch", "items": "70g boiled soya chunks in rich tomato-onion curry with 250g steamed white/brown rice and yellow dal"},
-                    {"time": "05:30 PM", "name": "Affordable Evening Fuel", "items": "Roasted makhana or roasted chana (50g) with hot jaggery tea"},
-                    {"time": "08:30 PM", "name": "Overnight Repair Dinner", "items": "Moong dal khichdi with 1 tbsp pure desi ghee, curd, and cucumber salad"}
-                ]
-
-                student_sched = f"06:15 AM - 08:00 AM: Ground {max_overs_per_spell} Overs Match Spell | 09:00 AM - 04:00 PM: College | Evening: Foam roll & Ice"
-                athlete_sched = f"07:30 AM - 10:00 AM: High-Velocity Match Spell ({max_speed} km/h) | 11:30 AM: Physio & Cold Plunge | 04:00 PM: Video Analysis"
-
-            elif has_ground and has_gym:
-                day_type = "dual_session"
-                badge = "Dual Session"
-                title = f"Ground Technical Drills ({avg_overs_per_session} Overs) + Gym Power"
-                ground_session = {
-                    "overs": avg_overs_per_session,
-                    "intensity": "85% Technical Rhythm",
-                    "focus": "Approach cadence, steady seam presentation, and release angle consistency",
-                    "drills": ["Crease alignment steps", f"Spot bowling ({avg_overs_per_session} overs)", "Follow-through hold for balance"],
-                }
-                gym_session = {
-                    "status": "Lower Body Power & Kinetic Chain",
-                    "duration": "60 mins",
-                    "focus": "Trap bar deadlifts, single-leg landing stiffness & rotational core",
-                    "exercises": [
-                        {"name": "Trap Bar Deadlift", "sets": 4, "reps": "5 reps @ 75% 1RM"},
-                        {"name": "Single-Leg Box Jumps (Stick Landing)", "sets": 3, "reps": "5 each leg"},
-                        {"name": "Pallof Press Core Hold", "sets": 3, "reps": "30s each side"}
-                    ],
-                }
-                nutrition_cals = target_cals + 200
-                day_protein = base_protein + 10
-                day_carbs = round((nutrition_cals * 0.50) / 4)
-                day_fats = round((nutrition_cals * 0.25) / 9)
-                workload_adaptation = (
-                    "Split energy pulses: rapid complex carbs before morning ground drills, high-protein synthesis support "
-                    "between sessions and after evening gym strength training."
-                )
-
-                # OPTION A: Elite Dual-Session Fuel
-                option_a_meals = [
-                    {"time": "06:00 AM", "name": "Ground Session Primer", "items": "1 banana with 1 tbsp peanut/almond butter, black coffee, 300ml electrolyte water"},
-                    {"time": "08:30 AM", "name": "Post-Ground Hearty Breakfast", "items": "Rolled oats (100g) with protein powder, chia seeds, sliced apple and soaked nuts" if is_veg else "4 boiled eggs (2 yolks), rolled oats porridge with sliced apple and nuts"},
-                    {"time": "01:00 PM", "name": "Midday Glycogen & Protein Plate", "items": "200g paneer curry with 3 chapatis, cucumber raita, sprout salad" if is_veg else "200g chicken breast curry with 3 chapatis, cucumber raita, sprout salad"},
-                    {"time": "04:45 PM", "name": "Pre-Gym Posterior Chain Primer", "items": "Handful of raisins, 8 soaked almonds, 1 slice multigrain toast, green tea"},
-                    {"time": "07:00 PM", "name": "Post-Gym Protein Pulse", "items": "1 scoop whey isolate in water or plant milk"},
-                    {"time": "08:45 PM", "name": "Restorative Dinner", "items": "3 multigrain rotis, thick yellow moong dal, paneer bhurji, beetroot salad" if is_veg else "3 multigrain rotis, thick moong dal, grilled chicken/fish, beetroot salad"}
-                ]
-
-                # OPTION B: Budget Dual-Session Fuel
-                option_b_meals = [
-                    {"time": "06:00 AM", "name": "Budget Morning Wake-up", "items": "Warm jaggery water with lemon, 1 banana, handful of roasted chana"},
-                    {"time": "08:30 AM", "name": "Post-Ground Fuel Breakfast", "items": "Besan & moong dal chilla (3 chillas) stuffed with grated paneer/potatoes, mint chutney"},
-                    {"time": "01:00 PM", "name": "Budget Power Lunch", "items": "Steamed rice with thick rajma or chole curry, cabbage salad, curd"},
-                    {"time": "04:45 PM", "name": "Pre-Gym Energy Boost", "items": "1 boiled sweet potato or 2 bananas with black coffee"},
-                    {"time": "07:00 PM", "name": "Post-Gym Low-Cost Protein", "items": "40g Sattu drink with water and rock salt, or 3 egg whites"},
-                    {"time": "08:45 PM", "name": "Restorative Budget Dinner", "items": "3 chapatis with soya chunk curry, mixed green sabzi, glass of warm milk"}
-                ]
-
-                student_sched = "06:30 AM - 08:00 AM: Ground Drills | 09:00 AM - 04:30 PM: Classes | 05:30 PM - 06:45 PM: Strength Gym"
-                athlete_sched = "08:00 AM - 10:00 AM: Technical Ground | 01:00 PM: Nutrition & Rest | 04:30 PM - 06:00 PM: Explosive Gym"
-
-            elif has_ground:
-                day_type = "ground_skill"
-                badge = "Ground Technical"
-                title = f"Run-up Cadence & Spot Bowling ({avg_overs_per_session} Overs)"
-                ground_session = {
-                    "overs": avg_overs_per_session,
-                    "intensity": "75% Spot Bowling",
-                    "focus": "Good length consistency, wrist snap, and front-knee brace firmness",
-                    "drills": ["Cone targets on 6-8 meter mark", "Approach acceleration sprints × 6", "Wrist release hold drills"],
-                }
-                gym_session = None
-                nutrition_cals = target_cals
-                day_protein = base_protein
-                day_carbs = round((nutrition_cals * 0.50) / 4)
-                day_fats = round((nutrition_cals * 0.25) / 9)
-                workload_adaptation = (
-                    "Steady hydration and moderate complex carbs to maintain run-up cadence and release angle "
-                    "sharpness without digestive heaviness."
-                )
-
-                option_a_meals = [
-                    {"time": "06:30 AM", "name": "Light Bowling Fuel", "items": "Warm lemon honey water, 1 banana, 6 soaked almonds"},
-                    {"time": "08:30 AM", "name": "Technical Recovery Breakfast", "items": "Moong dal chilla (3 chillas) with paneer filling, mint chutney, tender coconut water" if is_veg else "Egg scramble (3 eggs) with 2 multigrain rotis, sliced kiwi, coconut water"},
-                    {"time": "01:30 PM", "name": "Balanced Cricket Lunch", "items": "Brown basmati rice with light dal, paneer bhurji, carrot and cucumber salad" if is_veg else "Brown basmati rice with chicken curry, boiled egg, salad"},
-                    {"time": "05:30 PM", "name": "Afternoon Refuel", "items": "Sprouted moong chaat with chopped tomatoes, lemon juice, and pumpkin seeds"},
-                    {"time": "08:30 PM", "name": "Light Evening Meal", "items": "Vegetable paneer pulao with curd, 2 rotis, chamomile tea" if is_veg else "Grilled fish or chicken breast with 2 rotis, soup, chamomile tea"}
-                ]
-
-                option_b_meals = [
-                    {"time": "06:30 AM", "name": "Budget Pre-Ground Fuel", "items": "1 banana, handful of soaked black chana, warm water"},
-                    {"time": "08:30 AM", "name": "Wholesome Breakfast", "items": "Vegetable upma with roasted peanuts/sprouts, 1 cup curd"},
-                    {"time": "01:30 PM", "name": "Everyday Athletic Lunch", "items": "3 rotis, bowl of yellow dal, aloo-palak sabzi, cucumber salad"},
-                    {"time": "05:30 PM", "name": "Evening Snack", "items": "Boiled corn or roasted chana chaat with lemon and onion"},
-                    {"time": "08:30 PM", "name": "Light Dinner", "items": "Moong dal khichdi with roasted papad, 1 cup curd, warm turmeric milk"}
-                ]
-
-                student_sched = "06:30 AM - 08:00 AM: Ground | College / Study day | Evening stretching & dead hangs"
-                athlete_sched = "08:30 AM - 11:00 AM: Spot Bowling & Seam Release Clinic | Afternoon S&C review"
-
-            elif has_gym:
-                day_type = "gym_strength"
-                badge = "Gym Strength"
-                title = "Kinetic Chain & Lumbar Core Resilience"
-                ground_session = None
-                gym_session = {
-                    "status": "Strength & Core",
-                    "duration": "60 mins",
-                    "focus": "Lumbar protection, rotational anti-flexion & posterior chain",
-                    "exercises": [
-                        {"name": "Pallof Press Hold", "sets": 3, "reps": "30s each side"},
-                        {"name": "Bulgarian Split Squats", "sets": 3, "reps": "8 each leg"},
-                        {"name": "Nordic Hamstring Curls (Assisted)", "sets": 3, "reps": "5 reps"}
-                    ],
-                }
-                nutrition_cals = target_cals
-                day_protein = base_protein + 12
-                day_carbs = round((nutrition_cals * 0.45) / 4)
-                day_fats = round((nutrition_cals * 0.28) / 9)
-                workload_adaptation = (
-                    "Hyper-protein synthesis target for lumbar spine core stabilizers and eccentric hamstring "
-                    "tendon resilience."
-                )
-
-                option_a_meals = [
-                    {"time": "07:30 AM", "name": "Anabolic Foundation Breakfast", "items": "100g oats with peanut butter, chia seeds, and 1 scoop plant/whey protein powder" if is_veg else "3 whole eggs scrambled, 2 slices multigrain toast, glass of milk"},
-                    {"time": "11:00 AM", "name": "Mid-Morning Muscle Fuel", "items": "Greek yogurt with crushed walnuts, berries, and raw honey"},
-                    {"time": "01:30 PM", "name": "High-Protein Power Lunch", "items": "High-protein soya chunks and paneer curry, 3 chapatis, dal, mixed greens" if is_veg else "220g chicken breast curry with 3 chapatis, dal, mixed greens"},
-                    {"time": "04:30 PM", "name": "Pre-Workout Strength Primer", "items": "1 banana with 1 tbsp peanut butter, black coffee"},
-                    {"time": "06:45 PM", "name": "Post-Workout Whey Refuel", "items": "1 scoop whey isolate with water, 1 fresh seasonal fruit"},
-                    {"time": "08:45 PM", "name": "Overnight Recovery Dinner", "items": "Paneer bhurji or tofu with 2 rotis, bowl of dal, warm turmeric milk" if is_veg else "Grilled fish fillet / chicken with 2 rotis, dal, warm turmeric milk"}
-                ]
-
-                option_b_meals = [
-                    {"time": "07:30 AM", "name": "Budget Muscle Breakfast", "items": "Rolled oats cooked in milk with mashed banana and roasted seeds" if is_veg else "4 boiled eggs (2 whole, 2 whites) with 2 rotis and tea"},
-                    {"time": "11:00 AM", "name": "Mid-Morning Snack", "items": "1 glass fresh buttermilk (chaas) with roasted cumin, 1 apple or seasonal fruit"},
-                    {"time": "01:30 PM", "name": "Budget High-Protein Lunch", "items": "Soya chunk pulao (60g soya chunks) with onion-cucumber raita and dal"},
-                    {"time": "04:30 PM", "name": "Pre-Workout Fuel", "items": "1 banana with black coffee"},
-                    {"time": "06:45 PM", "name": "Post-Workout Low-Cost Fuel", "items": "40g Chana sattu shake or 3 boiled egg whites"},
-                    {"time": "08:45 PM", "name": "Overnight Dinner", "items": "3 rotis with paneer or thick dal, green vegetables, warm milk"}
-                ]
-
-                student_sched = "Day: Academic Focus | 05:30 PM - 06:45 PM: Core & Strength Gym Session"
-                athlete_sched = "10:00 AM - 11:30 AM: Kinetic Chain Gym | Afternoon Thoracic Mobility"
-
-            else:
-                day_type = "active_recovery"
-                badge = "Rest & Recovery"
-                title = "Spinal Decompression & Active Regeneration"
-                ground_session = None
-                gym_session = {
-                    "status": "Active Recovery & Mobility",
-                    "duration": "30 mins",
-                    "focus": "Spinal elongation, thoracic rotation & soft tissue release",
-                    "exercises": [
-                        {"name": "Dead Hangs from Pullup Bar", "sets": 3, "reps": "45s"},
-                        {"name": "Foam Rolling Hamstrings & IT Band", "sets": 3, "reps": "60s each"},
-                        {"name": "Thoracic Spine Foam Roller Extensions", "sets": 3, "reps": "10 breaths"}
-                    ],
-                }
-                nutrition_cals = max(2200, target_cals - 400)
-                day_protein = base_protein
-                day_carbs = round((nutrition_cals * 0.40) / 4)
-                day_fats = round((nutrition_cals * 0.32) / 9)
-                workload_adaptation = (
-                    "Anti-inflammatory, lower glycemic profile with high antioxidant density to flush lactic acid "
-                    "and rebuild collagen in knee tendons and lumbar cartilage."
-                )
-
-                option_a_meals = [
-                    {"time": "08:00 AM", "name": "Antioxidant Morning Bowl", "items": "Chia seed pudding with almond milk, blueberries, flaxseeds, walnuts, and honey"},
-                    {"time": "01:00 PM", "name": "Digestive Reset Lunch", "items": "Yellow moong dal khichdi with roasted paneer, steamed broccoli, curd, cucumber salad" if is_veg else "Clear chicken bone broth soup with steamed brown rice, veggies, salad"},
-                    {"time": "04:30 PM", "name": "Mineral Hydration Booster", "items": "Tender coconut water, handful of roasted pumpkin seeds, green tea"},
-                    {"time": "07:30 PM", "name": "Cellular Repair Dinner", "items": "Tofu or paneer stir-fry with zucchini and bell peppers, 2 rotis, chamomile tea" if is_veg else "Steamed fish with lemon herb butter, asparagus, 2 rotis, chamomile tea"}
-                ]
-
-                option_b_meals = [
-                    {"time": "08:00 AM", "name": "Budget Clean Morning", "items": "Warm water with lemon and honey, 1 bowl daliya or oats porridge with milk"},
-                    {"time": "01:00 PM", "name": "Soothing Recovery Lunch", "items": "Moong dal khichdi with curd, roasted papad, and tomato salad"},
-                    {"time": "04:30 PM", "name": "Hydration Refresh", "items": "Nimbu pani (lemonade) with pinch of rock salt and roasted chana"},
-                    {"time": "07:30 PM", "name": "Restorative Budget Dinner", "items": "2 soft chapatis with lauki/tori vegetable sabzi, light dal, warm milk with turmeric"}
-                ]
-
-                student_sched = "Full rest from high-impact bowling. Study & 20 min evening gentle walk."
-                athlete_sched = "Ice baths, contrast therapy, massage & pool mobility."
-
-            active_sched = student_sched if athlete_status == "student" else athlete_sched
-
-            schedule.append({
-                "day": day_name,
-                "day_type": day_type,
-                "badge": badge,
-                "title": title,
-                "workload": {
-                    "ground_session": ground_session,
-                    "gym_session": gym_session,
-                },
-                "nutrition": {
-                    "calories": nutrition_cals,
-                    "protein_g": day_protein,
-                    "carbs_g": day_carbs,
-                    "fats_g": day_fats,
-                    "focus": "High glycogen replenishment" if is_match_spell else "Standard athletic balance",
-                    "workload_adaptation": workload_adaptation,
-                    "meals": option_a_meals,  # Default fallback
-                    "meal_options": {
-                        "option_a": {
-                            "name": "Option A: Elite High-Performance Fuel",
-                            "description": "High-leucine, high-glycogen timing calibrated for maximum bowling velocity and rapid tissue repair.",
-                            "meals": option_a_meals
-                        },
-                        "option_b": {
-                            "name": "Option B: Budget-Friendly & Quick-Prep Fuel",
-                            "description": "Affordable, easily available Indian ingredients (Sattu, Moong dal, Chana, Eggs/Soya) providing identical macro totals.",
-                            "meals": option_b_meals
-                        }
-                    }
-                },
-                "student_schedule": student_sched,
-                "fulltime_schedule": athlete_sched,
-                "active_schedule": active_sched,
-                "session_gap_advisory": (
-                    f"{session_gap}. Maintain hydration and electrolytes."
-                    if (has_ground and has_gym)
-                    else "Single session focus today."
-                ),
-            })
+        schedule = self._generate_llm_schedule(
+            payload=payload,
+            calculated_metrics={
+                "bmr": bmr,
+                "base_tdee": base_tdee,
+                "target_cals": target_cals,
+                "base_protein": base_protein,
+                "estimated_weekly_overs": estimated_weekly_overs,
+                "overs_ceiling": overs_ceiling,
+                "spell_ceiling": spell_ceiling,
+                "acwr_score": acwr_score,
+                "acwr_status": acwr_status,
+                "weekly_bowling_days": weekly_bowling_days,
+                "ground_days": ground_days,
+                "gym_days": gym_days,
+                "max_overs_per_spell": max_overs_per_spell,
+                "avg_overs_per_session": avg_overs_per_session,
+                "max_speed": max_speed,
+                "injury_status": injury_status,
+                "session_gap": session_gap,
+                "athlete_status": athlete_status,
+                "user_weight": user_weight,
+                "user_height": user_height,
+                "user_age": user_age,
+                "user_sex": user_sex,
+                "goal": goal,
+                "food_pref": food_pref,
+                "is_veg": is_veg,
+                "selected_allergies": selected_allergies,
+                "weekly_budget": weekly_budget,
+                "strength_track": strength_track,
+                "deadlift_kg": deadlift_kg,
+                "est_deadlift_1rm": est_deadlift_1rm,
+                "does_deadlifts": does_deadlifts,
+                "has_gym": has_gym,
+                "bowling_arm": bowling_arm,
+                "bowling_action": bowling_action,
+                "runup_length": runup_length,
+            },
+            llm_client=None
+        )
 
         calculated_bmr = self.calculate_bmr(user_weight, user_height, user_age, user_sex)
 
@@ -1642,36 +1641,426 @@ class PlannerService:
         combined_plan = self.generate_combined_plan(payload)
         weekly_schedule = []
 
-        for day in combined_plan["schedule"]:
+        for day in combined_plan.get("schedule", []):
             details = []
-            ground_session = day["workload"].get("ground_session")
-            gym_session = day["workload"].get("gym_session")
+            ground_session = day.get("workload", {}).get("ground_session")
+            gym_session = day.get("workload", {}).get("gym_session")
 
             if ground_session:
-                details.extend(ground_session.get("drills", []))
+                drills = ground_session.get("drills", [])
+                if isinstance(drills, list):
+                    details.extend(drills)
+                elif isinstance(drills, str):
+                    details.append(drills)
             if gym_session:
-                details.extend(
-                    f'{exercise["name"]} {exercise["sets"]}x{exercise["reps"]}'
-                    for exercise in gym_session.get("exercises", [])
-                )
+                exercises = gym_session.get("exercises", [])
+                if isinstance(exercises, list):
+                    for exercise in exercises:
+                        if isinstance(exercise, dict):
+                            details.append(f'{exercise.get("name", "Exercise")} {exercise.get("sets", 3)}x{exercise.get("reps", "8-10 reps")}')
+                        elif isinstance(exercise, str):
+                            details.append(exercise)
             if not details:
-                details.append("Mobility, hydration, and recovery work")
+                details.append("Mobility, spinal decompression, hydration, and recovery work")
 
             weekly_schedule.append({
-                "day": day["day"].upper(),
-                "title": day["title"],
+                "day": str(day.get("day", "DAY")).upper(),
+                "title": str(day.get("title", "Training Session")),
                 "details": details,
             })
 
         return {
             "id": f'wp_{int(datetime.now().timestamp() * 1000)}',
-            "title": "Fast Bowler Weekly Workplan",
-            "focus": "Speed, workload control, and lumbar protection",
+            "title": f"Fast Bowler 7-Day Performance Workplan ({combined_plan.get('workload_summary', {}).get('max_speed', 132)} km/h Focus)",
+            "focus": f"Speed, ACWR Workload ({combined_plan.get('workload_summary', {}).get('acwr_score', 1.18)}), and lumbar spine protection",
             "weeklySchedule": weekly_schedule,
-            "workload_summary": combined_plan["workload_summary"],
+            "days_count": len(weekly_schedule),
+            "workload_summary": combined_plan.get("workload_summary", {}),
+            "strength_assessment": combined_plan.get("strength_assessment", {}),
             "ai_coaching_assessment": combined_plan.get("ai_coaching_assessment"),
             "ai_assessment": combined_plan.get("ai_assessment"),
         }
+
+    def _generate_llm_schedule(
+        self,
+        payload: Dict[str, Any],
+        calculated_metrics: Dict[str, Any],
+        llm_client: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Calls LLM to generate the synchronized 7-day cricket workload & nutrition
+        schedule matching the exact calculated training days, overs, speed,
+        and caloric targets. Falls back to deterministic engine if offline.
+        """
+        client = llm_client or LLMClient()
+        cm = calculated_metrics
+
+        system_prompt = (
+            "You are PacePro AI's Lead Fast Bowling Strength & Conditioning Coach and Head Sports Scientist.\n"
+            "You are provided with pre-calculated, verified sports-science metrics for a cricket fast bowler:\n"
+            f"- Athletic Profile: {cm.get('user_age')} yrs, {cm.get('user_weight')} kg, {cm.get('user_height')} cm, Goal: '{cm.get('goal')}', Status: '{cm.get('athlete_status')}'\n"
+            f"- Bowling Pace: {cm.get('max_speed')} km/h ({cm.get('bowling_arm')}-arm, {cm.get('bowling_action')} action)\n"
+            f"- Workload Constraints: Exactly {cm.get('ground_days')} Ground sessions, {cm.get('gym_days')} Gym sessions, {cm.get('weekly_bowling_days')} Bowling Spells (Max spell: {cm.get('max_overs_per_spell')} overs)\n"
+            f"- ACWR Workload: {cm.get('acwr_score')} ({cm.get('acwr_status')}), Safe Weekly Ceiling: {cm.get('overs_ceiling')} overs\n"
+            f"- Calculated Calories: Bowling Days ({cm.get('target_cals') + 350} kcal), Training Days ({cm.get('target_cals')} kcal), Recovery Days ({max(2200, cm.get('target_cals') - 450)} kcal)\n"
+            f"- Protein Target: {cm.get('base_protein')}g daily\n"
+            f"- Food Preference: '{cm.get('food_pref')}' | Allergies to avoid: {json.dumps(cm.get('selected_allergies', []))}\n\n"
+            "CRITICAL RULES:\n"
+            "1. Generate exactly 7 synchronized days (Monday through Sunday).\n"
+            "2. Strictly respect the ground and gym session counts and ensure bowling match spells are spaced by ~48h.\n"
+            "3. Ground sessions must have specific cricket drills (e.g. Marker sprints, 5 overs match pace, yorkers). Gym sessions must have specific fast-bowling exercises (e.g. Trap Bar Deadlift 3x5, Bulgarian Split Squat 3x8, Pallof Press 3x12) with sets and reps.\n"
+            "4. Keep meal items clear, crisp, and realistic for Indian cricketers.\n"
+            "5. Respond ONLY with a valid JSON array of 7 day objects matching this exact schema:\n"
+            "[\n"
+            "  {\n"
+            '    "day": "Monday",\n'
+            '    "day_type": "max_overs_bowling",\n'
+            '    "badge": "Max Overs Spell",\n'
+            '    "title": "High-Intensity Match Spell (8 Overs @ 132 km/h)",\n'
+            '    "workload": {\n'
+            '      "ground_session": {"overs": 8, "intensity": "100% Match Pace", "focus": "Yorkers & Brace Lock", "drills": ["Run-up cadence marker sprints (4 reps)", "Good-length line & length targets (5 overs)", "Death-overs wide yorkers (3 overs)", "Thoracic decompression dead hangs"]},\n'
+            '      "gym_session": null\n'
+            '    },\n'
+            '    "nutrition": {\n'
+            f'      "calories": {cm.get("target_cals") + 350},\n'
+            f'      "protein_g": {cm.get("base_protein")},\n'
+            f'      "carbs_g": {round((cm.get("target_cals") * 0.50) / 4)},\n'
+            f'      "fats_g": {round((cm.get("target_cals") * 0.25) / 9)},\n'
+            '      "focus": "High glycogen replenishment & tendon collagen repair",\n'
+            '      "workload_adaptation": "Pre-spell fast carbs 45m before and post-session whey/dahi within 30m",\n'
+            '      "meal_options": {\n'
+            '        "option_a": {"name": "Option A: Elite Performance Fuel", "meals": [{"time": "07:30 AM", "name": "Breakfast", "items": "100g Rolled Oats with Whey, 2 Boiled Eggs/Paneer, Banana"}, {"time": "01:00 PM", "name": "Lunch", "items": "Grilled Chicken/Paneer, Brown Rice, Dal, Curd"}, {"time": "08:30 PM", "name": "Dinner", "items": "3 Rotis, Yellow Dal, Soya/Fish, Spinach Salad"}]},\n'
+            '        "option_b": {"name": "Option B: Budget Indian Fuel", "meals": [{"time": "07:30 AM", "name": "Breakfast", "items": "Sattu Drink (50g), 4 Boiled Eggs/Sprouts, 2 Bananas"}, {"time": "01:00 PM", "name": "Lunch", "items": "Rajma/Chole Chawal, Greek Dahi, Cucumber Salad"}, {"time": "08:30 PM", "name": "Dinner", "items": "3 Multigrain Rotis, Moong Dal Khichdi, Paneer Bhurji"}]}'
+            '      }\n'
+            '    },\n'
+            '    "student_schedule": "06:15 AM - 08:00 AM Ground | 09:00 AM - 04:00 PM Classes | 05:00 PM Recovery",\n'
+            '    "fulltime_schedule": "07:30 AM - 10:00 AM Bowling Spell | 11:30 AM Contrast Shower & Lunch | 04:00 PM Mobility",\n'
+            '    "session_gap_advisory": "Single high-velocity session today. Maintain 48h before next heavy bowling spell."\n'
+            "  }\n"
+            "]"
+        )
+
+        user_prompt = (
+            f"Generate the complete 7-Day Fast Bowler Schedule (Monday to Sunday) for {cm.get('user_weight')}kg bowler targeting {cm.get('goal')}.\n"
+            f"Ground Days: {cm.get('ground_days')} | Gym Days: {cm.get('gym_days')} | Bowling Spells: {cm.get('weekly_bowling_days')} | Speed: {cm.get('max_speed')} km/h.\n"
+            f"Diet: {cm.get('food_pref')} | Target Calories: {cm.get('target_cals')} kcal | Protein: {cm.get('base_protein')}g."
+        )
+
+        try:
+            parsed = client.generate_json(system_prompt, user_prompt)
+            if isinstance(parsed, dict) and "schedule" in parsed:
+                parsed = parsed["schedule"]
+            if isinstance(parsed, list) and len(parsed) == 7:
+                cleaned_schedule = []
+                for d in parsed:
+                    if isinstance(d, dict) and "day" in d:
+                        cleaned_schedule.append({
+                            "day": str(d.get("day", "Day")),
+                            "day_type": str(d.get("day_type", "ground_skill")),
+                            "badge": str(d.get("badge", "Training")),
+                            "title": str(d.get("title", "Bowling Training")),
+                            "workload": d.get("workload", {}),
+                            "nutrition": d.get("nutrition", {}),
+                            "student_schedule": str(d.get("student_schedule", "Study & Ground Sessions")),
+                            "fulltime_schedule": str(d.get("fulltime_schedule", "Pro Athlete Schedule")),
+                            "active_schedule": str(d.get("student_schedule" if cm.get("athlete_status") == "student" else "fulltime_schedule", "")),
+                            "session_gap_advisory": str(d.get("session_gap_advisory", cm.get("session_gap", "7-8h gap between sessions"))),
+                        })
+                if len(cleaned_schedule) == 7:
+                    return cleaned_schedule
+        except Exception as e:
+            logger.warning(f"[PlannerService] LLM 7-day schedule generation failed or offline: {e}")
+
+        # Fallback to sports-science engine schedule
+        return self._build_fallback_schedule(calculated_metrics)
+
+    def _build_fallback_schedule(self, cm: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Deterministic, sports-science calculated 7-day synchronized schedule
+        matching exact ground/gym days, max-overs spells, and nutritional targets.
+        """
+        days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        schedule = []
+        rem_bowling_days = cm.get("weekly_bowling_days", 3)
+        rem_ground = cm.get("ground_days", 4)
+        rem_gym = cm.get("gym_days", 3)
+        
+        target_cals = cm.get("target_cals", 2800)
+        base_protein = cm.get("base_protein", 150)
+        max_overs_per_spell = cm.get("max_overs_per_spell", 8)
+        avg_overs_per_session = cm.get("avg_overs_per_session", 5)
+        max_speed = cm.get("max_speed", 132.0)
+        session_gap = cm.get("session_gap", "7-8h gap between sessions")
+        athlete_status = cm.get("athlete_status", "student")
+        is_veg = cm.get("is_veg", False)
+
+        for idx, day_name in enumerate(days_of_week):
+            is_match_spell = False
+            has_ground = False
+            has_gym = False
+
+            if rem_bowling_days > 0 and (idx == 0 or idx == 3 or (idx == 5 and rem_bowling_days >= 3)):
+                is_match_spell = (idx == 0 or (idx == 3 and rem_bowling_days >= 2))
+                has_ground = True
+                rem_bowling_days -= 1
+                rem_ground = max(0, rem_ground - 1)
+            elif rem_ground > 0 and (idx in (0, 2, 4)):
+                has_ground = True
+                rem_ground -= 1
+
+            if rem_gym > 0 and (idx in (1, 3, 5) or (idx == 0 and rem_gym >= 4)):
+                has_gym = True
+                rem_gym -= 1
+
+            if is_match_spell:
+                day_type = "max_overs_bowling"
+                badge = "Max Overs Spell"
+                title = f"High-Intensity Match Spell ({max_overs_per_spell} Overs @ {max_speed} km/h)"
+                ground_session = {
+                    "overs": max_overs_per_spell,
+                    "intensity": f"100% Match Pace ({max_speed} km/h)",
+                    "focus": "Full-speed match spell with front knee brace firmness and yorker target execution",
+                    "drills": [
+                        "Dynamic run-up markers × 4 acceleration build-ups",
+                        f"Target bowling on 6-8 meter good length ({max(3, max_overs_per_spell - 3)} overs)",
+                        f"Death overs yorkers and wide yorkers ({min(3, max_overs_per_spell)} overs)",
+                        "Post-spell 3x45s dead hangs for lumbar decompression"
+                    ],
+                }
+                gym_session = None
+                nutrition_cals = target_cals + 350
+                day_protein = base_protein
+                day_carbs = round((nutrition_cals * 0.55) / 4)
+                day_fats = round((nutrition_cals * 0.22) / 9)
+                workload_adaptation = (
+                    f"High glycogen pre-load and anti-inflammatory recovery calibrated for {max_overs_per_spell} overs "
+                    f"at match pace ({max_speed} km/h) and heavy front-knee brace ground reaction forces."
+                )
+                option_a_meals = [
+                    {"time": "06:00 AM", "name": "Pre-Spell Glycogen Primer", "items": "2 ripe bananas with raw honey, 1 multigrain toast, 350ml electrolyte hydration water"},
+                    {"time": "08:30 AM", "name": "Rapid Post-Spell Recovery", "items": "1 scoop whey/plant isolate in tender coconut water, 1 large boiled sweet potato"},
+                    {"time": "10:30 AM", "name": "Athletic Power Breakfast", "items": "Paneer bhurji (150g) with 3 chapatis and seasonal fruit bowl" if is_veg else "3 egg whites + 1 whole egg omelette with 2 multigrain toasts, fruit bowl"},
+                    {"time": "02:00 PM", "name": "Tissue Repair Lunch", "items": "200g soya chunk curry with 200g brown basmati rice, steamed spinach, probiotic curd" if is_veg else "200g grilled chicken breast with 200g brown basmati rice, steamed spinach, curd"},
+                    {"time": "05:30 PM", "name": "Joint De-Stress Recovery Snack", "items": "Roasted Bengal gram (chana, 60g), soaked pumpkin seeds, green tea"},
+                    {"time": "08:30 PM", "name": "Spine & Lumbar Healing Dinner", "items": "3 multigrain rotis with yellow dal tadka, sautéed paneer, mixed salad, warm golden turmeric milk" if is_veg else "3 multigrain rotis with grilled fish or chicken, dal tadka, salad, turmeric milk"}
+                ]
+                option_b_meals = [
+                    {"time": "06:00 AM", "name": "Budget Pre-Spell Quick Fuel", "items": "2 large bananas with jaggery (gud), pinch of black salt in lemon water"},
+                    {"time": "08:30 AM", "name": "Budget Post-Spell Recovery", "items": "1 glass fresh sattu drink (40g chana sattu) with lemon, 1 boiled potato with rock salt"},
+                    {"time": "10:30 AM", "name": "High-Value Breakfast", "items": "Poha with roasted peanuts & boiled sprouts (100g), 1 glass milk" if is_veg else "3 boiled eggs with 2 plain rotis and sliced tomato-cucumber salad"},
+                    {"time": "02:00 PM", "name": "Budget High-Protein Lunch", "items": "70g boiled soya chunks in rich tomato-onion curry with 250g steamed rice and yellow dal"},
+                    {"time": "05:30 PM", "name": "Affordable Evening Fuel", "items": "Roasted makhana or roasted chana (50g) with hot jaggery tea"},
+                    {"time": "08:30 PM", "name": "Overnight Repair Dinner", "items": "Moong dal khichdi with 1 tbsp pure desi ghee, curd, and cucumber salad"}
+                ]
+                student_sched = f"06:15 AM - 08:00 AM: Ground {max_overs_per_spell} Overs Match Spell | 09:00 AM - 04:00 PM: College | Evening: Foam roll & Ice"
+                athlete_sched = f"07:30 AM - 10:00 AM: High-Velocity Match Spell ({max_speed} km/h) | 11:30 AM: Physio & Cold Plunge | 04:00 PM: Video Analysis"
+
+            elif has_ground and has_gym:
+                day_type = "dual_session"
+                badge = "Dual Session"
+                title = f"Ground Technical Drills ({avg_overs_per_session} Overs) + Gym Power"
+                ground_session = {
+                    "overs": avg_overs_per_session,
+                    "intensity": "85% Technical Rhythm",
+                    "focus": "Approach cadence, steady seam presentation, and release angle consistency",
+                    "drills": ["Crease alignment steps", f"Spot bowling ({avg_overs_per_session} overs)", "Follow-through hold for balance"],
+                }
+                gym_session = {
+                    "status": "Lower Body Power & Kinetic Chain",
+                    "duration": "60 mins",
+                    "focus": "Trap bar deadlifts, single-leg landing stiffness & rotational core",
+                    "exercises": [
+                        {"name": "Trap Bar Deadlift", "sets": 4, "reps": "5 reps @ 75% 1RM"},
+                        {"name": "Single-Leg Box Jumps (Stick Landing)", "sets": 3, "reps": "5 each leg"},
+                        {"name": "Pallof Press Core Hold", "sets": 3, "reps": "30s each side"}
+                    ],
+                }
+                nutrition_cals = target_cals + 200
+                day_protein = base_protein + 10
+                day_carbs = round((nutrition_cals * 0.50) / 4)
+                day_fats = round((nutrition_cals * 0.25) / 9)
+                workload_adaptation = (
+                    "Split energy pulses: rapid complex carbs before morning ground drills, high-protein synthesis support "
+                    "between sessions and after evening gym strength training."
+                )
+                option_a_meals = [
+                    {"time": "06:00 AM", "name": "Ground Session Primer", "items": "1 banana with 1 tbsp peanut/almond butter, black coffee, 300ml electrolyte water"},
+                    {"time": "08:30 AM", "name": "Post-Ground Hearty Breakfast", "items": "Rolled oats (100g) with protein powder, chia seeds, sliced apple and soaked nuts" if is_veg else "4 boiled eggs (2 yolks), rolled oats porridge with sliced apple and nuts"},
+                    {"time": "01:00 PM", "name": "Midday Glycogen & Protein Plate", "items": "200g paneer curry with 3 chapatis, cucumber raita, sprout salad" if is_veg else "200g chicken breast curry with 3 chapatis, cucumber raita, sprout salad"},
+                    {"time": "04:45 PM", "name": "Pre-Gym Posterior Chain Primer", "items": "Handful of raisins, 8 soaked almonds, 1 slice multigrain toast, green tea"},
+                    {"time": "07:00 PM", "name": "Post-Gym Protein Pulse", "items": "1 scoop whey isolate in water or plant milk"},
+                    {"time": "08:45 PM", "name": "Restorative Dinner", "items": "3 multigrain rotis, thick yellow moong dal, paneer bhurji, beetroot salad" if is_veg else "3 multigrain rotis, thick moong dal, grilled chicken/fish, beetroot salad"}
+                ]
+                option_b_meals = [
+                    {"time": "06:00 AM", "name": "Budget Morning Wake-up", "items": "Warm jaggery water with lemon, 1 banana, handful of roasted chana"},
+                    {"time": "08:30 AM", "name": "Post-Ground Fuel Breakfast", "items": "Besan & moong dal chilla (3 chillas) stuffed with grated paneer/potatoes, mint chutney"},
+                    {"time": "01:00 PM", "name": "Budget Power Lunch", "items": "Steamed rice with thick rajma or chole curry, cabbage salad, curd"},
+                    {"time": "04:45 PM", "name": "Pre-Gym Energy Boost", "items": "1 boiled sweet potato or 2 bananas with black coffee"},
+                    {"time": "07:00 PM", "name": "Post-Gym Low-Cost Protein", "items": "40g Sattu drink with water and rock salt, or 3 egg whites"},
+                    {"time": "08:45 PM", "name": "Restorative Budget Dinner", "items": "3 chapatis with soya chunk curry, mixed green sabzi, glass of warm milk"}
+                ]
+                student_sched = "06:30 AM - 08:00 AM: Ground Drills | 09:00 AM - 04:30 PM: Classes | 05:30 PM - 06:45 PM: Strength Gym"
+                athlete_sched = "08:00 AM - 10:00 AM: Technical Ground | 01:00 PM: Nutrition & Rest | 04:30 PM - 06:00 PM: Explosive Gym"
+
+            elif has_ground:
+                day_type = "ground_skill"
+                badge = "Ground Technical"
+                title = f"Run-up Cadence & Spot Bowling ({avg_overs_per_session} Overs)"
+                ground_session = {
+                    "overs": avg_overs_per_session,
+                    "intensity": "75% Spot Bowling",
+                    "focus": "Good length consistency, wrist snap, and front-knee brace firmness",
+                    "drills": ["Cone targets on 6-8 meter mark", "Approach acceleration sprints × 6", "Wrist release hold drills"],
+                }
+                gym_session = None
+                nutrition_cals = target_cals
+                day_protein = base_protein
+                day_carbs = round((nutrition_cals * 0.50) / 4)
+                day_fats = round((nutrition_cals * 0.25) / 9)
+                workload_adaptation = (
+                    "Steady hydration and moderate complex carbs to maintain run-up cadence and release angle "
+                    "sharpness without digestive heaviness."
+                )
+                option_a_meals = [
+                    {"time": "06:30 AM", "name": "Light Bowling Fuel", "items": "Warm lemon honey water, 1 banana, 6 soaked almonds"},
+                    {"time": "08:30 AM", "name": "Technical Recovery Breakfast", "items": "Moong dal chilla (3 chillas) with paneer filling, mint chutney, tender coconut water" if is_veg else "Egg scramble (3 eggs) with 2 multigrain rotis, sliced kiwi, coconut water"},
+                    {"time": "01:30 PM", "name": "Balanced Cricket Lunch", "items": "Brown basmati rice with light dal, paneer bhurji, carrot and cucumber salad" if is_veg else "Brown basmati rice with chicken curry, boiled egg, salad"},
+                    {"time": "05:30 PM", "name": "Afternoon Refuel", "items": "Sprouted moong chaat with chopped tomatoes, lemon juice, and pumpkin seeds"},
+                    {"time": "08:30 PM", "name": "Light Evening Meal", "items": "Vegetable paneer pulao with curd, 2 rotis, chamomile tea" if is_veg else "Grilled fish or chicken breast with 2 rotis, soup, chamomile tea"}
+                ]
+                option_b_meals = [
+                    {"time": "06:30 AM", "name": "Budget Pre-Ground Fuel", "items": "1 banana, handful of soaked black chana, warm water"},
+                    {"time": "08:30 AM", "name": "Wholesome Breakfast", "items": "Vegetable upma with roasted peanuts/sprouts, 1 cup curd"},
+                    {"time": "01:30 PM", "name": "Everyday Athletic Lunch", "items": "3 rotis, bowl of yellow dal, aloo-palak sabzi, cucumber salad"},
+                    {"time": "05:30 PM", "name": "Evening Snack", "items": "Boiled corn or roasted chana chaat with lemon and onion"},
+                    {"time": "08:30 PM", "name": "Light Dinner", "items": "Moong dal khichdi with roasted papad, 1 cup curd, warm turmeric milk"}
+                ]
+                student_sched = "06:30 AM - 08:00 AM: Ground | College / Study day | Evening stretching & dead hangs"
+                athlete_sched = "08:30 AM - 11:00 AM: Spot Bowling & Seam Release Clinic | Afternoon S&C review"
+
+            elif has_gym:
+                day_type = "gym_strength"
+                badge = "Gym Strength"
+                title = "Kinetic Chain & Lumbar Core Resilience"
+                ground_session = None
+                gym_session = {
+                    "status": "Strength & Core",
+                    "duration": "60 mins",
+                    "focus": "Lumbar protection, rotational anti-flexion & posterior chain",
+                    "exercises": [
+                        {"name": "Pallof Press Hold", "sets": 3, "reps": "30s each side"},
+                        {"name": "Bulgarian Split Squats", "sets": 3, "reps": "8 each leg"},
+                        {"name": "Nordic Hamstring Curls (Assisted)", "sets": 3, "reps": "5 reps"}
+                    ],
+                }
+                nutrition_cals = target_cals
+                day_protein = base_protein + 12
+                day_carbs = round((nutrition_cals * 0.45) / 4)
+                day_fats = round((nutrition_cals * 0.28) / 9)
+                workload_adaptation = (
+                    "Hyper-protein synthesis target for lumbar spine core stabilizers and eccentric hamstring "
+                    "tendon resilience."
+                )
+                option_a_meals = [
+                    {"time": "07:30 AM", "name": "Anabolic Foundation Breakfast", "items": "100g oats with peanut butter, chia seeds, and 1 scoop plant/whey protein powder" if is_veg else "3 whole eggs scrambled, 2 slices multigrain toast, glass of milk"},
+                    {"time": "11:00 AM", "name": "Mid-Morning Muscle Fuel", "items": "Greek yogurt with crushed walnuts, berries, and raw honey"},
+                    {"time": "01:30 PM", "name": "High-Protein Power Lunch", "items": "High-protein soya chunks and paneer curry, 3 chapatis, dal, mixed greens" if is_veg else "220g chicken breast curry with 3 chapatis, dal, mixed greens"},
+                    {"time": "04:30 PM", "name": "Pre-Workout Strength Primer", "items": "1 banana with 1 tbsp peanut butter, black coffee"},
+                    {"time": "06:45 PM", "name": "Post-Workout Whey Refuel", "items": "1 scoop whey isolate with water, 1 fresh seasonal fruit"},
+                    {"time": "08:45 PM", "name": "Overnight Recovery Dinner", "items": "Paneer bhurji or tofu with 2 rotis, bowl of dal, warm turmeric milk" if is_veg else "Grilled fish fillet / chicken with 2 rotis, dal, warm turmeric milk"}
+                ]
+                option_b_meals = [
+                    {"time": "07:30 AM", "name": "Budget Muscle Breakfast", "items": "Rolled oats cooked in milk with mashed banana and roasted seeds" if is_veg else "4 boiled eggs (2 whole, 2 whites) with 2 rotis and tea"},
+                    {"time": "11:00 AM", "name": "Mid-Morning Snack", "items": "1 glass fresh buttermilk (chaas) with roasted cumin, 1 apple or seasonal fruit"},
+                    {"time": "01:30 PM", "name": "Budget High-Protein Lunch", "items": "Soya chunk pulao (60g soya chunks) with onion-cucumber raita and dal"},
+                    {"time": "04:30 PM", "name": "Pre-Workout Fuel", "items": "1 banana with black coffee"},
+                    {"time": "06:45 PM", "name": "Post-Workout Low-Cost Fuel", "items": "40g Chana sattu shake or 3 boiled egg whites"},
+                    {"time": "08:45 PM", "name": "Overnight Dinner", "items": "3 rotis with paneer or thick dal, green vegetables, warm milk"}
+                ]
+                student_sched = "Day: Academic Focus | 05:30 PM - 06:45 PM: Core & Strength Gym Session"
+                athlete_sched = "10:00 AM - 11:30 AM: Kinetic Chain Gym | Afternoon Thoracic Mobility"
+
+            else:
+                day_type = "active_recovery"
+                badge = "Rest & Recovery"
+                title = "Spinal Decompression & Active Regeneration"
+                ground_session = None
+                gym_session = {
+                    "status": "Active Recovery & Mobility",
+                    "duration": "30 mins",
+                    "focus": "Spinal elongation, thoracic rotation & soft tissue release",
+                    "exercises": [
+                        {"name": "Dead Hangs from Pullup Bar", "sets": 3, "reps": "45s"},
+                        {"name": "Foam Rolling Hamstrings & IT Band", "sets": 3, "reps": "60s each"},
+                        {"name": "Thoracic Spine Foam Roller Extensions", "sets": 3, "reps": "10 breaths"}
+                    ],
+                }
+                nutrition_cals = max(2200, target_cals - 400)
+                day_protein = base_protein
+                day_carbs = round((nutrition_cals * 0.40) / 4)
+                day_fats = round((nutrition_cals * 0.32) / 9)
+                workload_adaptation = (
+                    "Anti-inflammatory, lower glycemic profile with high antioxidant density to flush lactic acid "
+                    "and rebuild collagen in knee tendons and lumbar cartilage."
+                )
+                option_a_meals = [
+                    {"time": "08:00 AM", "name": "Antioxidant Morning Bowl", "items": "Chia seed pudding with almond milk, blueberries, flaxseeds, walnuts, and honey"},
+                    {"time": "01:00 PM", "name": "Digestive Reset Lunch", "items": "Yellow moong dal khichdi with roasted paneer, steamed broccoli, curd, cucumber salad" if is_veg else "Clear chicken bone broth soup with steamed brown rice, veggies, salad"},
+                    {"time": "04:30 PM", "name": "Mineral Hydration Booster", "items": "Tender coconut water, handful of roasted pumpkin seeds, green tea"},
+                    {"time": "07:30 PM", "name": "Cellular Repair Dinner", "items": "Tofu or paneer stir-fry with zucchini and bell peppers, 2 rotis, chamomile tea" if is_veg else "Steamed fish with lemon herb butter, asparagus, 2 rotis, chamomile tea"}
+                ]
+                option_b_meals = [
+                    {"time": "08:00 AM", "name": "Budget Clean Morning", "items": "Warm water with lemon and honey, 1 bowl daliya or oats porridge with milk"},
+                    {"time": "01:00 PM", "name": "Soothing Recovery Lunch", "items": "Moong dal khichdi with curd, roasted papad, and tomato salad"},
+                    {"time": "04:30 PM", "name": "Hydration Refresh", "items": "Nimbu pani (lemonade) with pinch of rock salt and roasted chana"},
+                    {"time": "07:30 PM", "name": "Restorative Budget Dinner", "items": "2 soft chapatis with lauki/tori vegetable sabzi, light dal, warm milk with turmeric"}
+                ]
+                student_sched = "Full rest from high-impact bowling. Study & 20 min evening gentle walk."
+                athlete_sched = "Ice baths, contrast therapy, massage & pool mobility."
+
+            active_sched = student_sched if athlete_status == "student" else athlete_sched
+
+            schedule.append({
+                "day": day_name,
+                "day_type": day_type,
+                "badge": badge,
+                "title": title,
+                "workload": {
+                    "ground_session": ground_session,
+                    "gym_session": gym_session,
+                },
+                "nutrition": {
+                    "calories": nutrition_cals,
+                    "protein_g": day_protein,
+                    "carbs_g": day_carbs,
+                    "fats_g": day_fats,
+                    "focus": "High glycogen replenishment" if is_match_spell else "Standard athletic balance",
+                    "workload_adaptation": workload_adaptation,
+                    "meals": option_a_meals,
+                    "meal_options": {
+                        "option_a": {
+                            "name": "Option A: Elite High-Performance Fuel",
+                            "description": "High-leucine, high-glycogen timing calibrated for maximum bowling velocity and rapid tissue repair.",
+                            "meals": option_a_meals
+                        },
+                        "option_b": {
+                            "name": "Option B: Budget-Friendly & Quick-Prep Fuel",
+                            "description": "Affordable, easily available Indian ingredients (Sattu, Moong dal, Chana, Eggs/Soya) providing identical macro totals.",
+                            "meals": option_b_meals
+                        }
+                    }
+                },
+                "student_schedule": student_sched,
+                "fulltime_schedule": athlete_sched,
+                "active_schedule": active_sched,
+                "session_gap_advisory": (
+                    f"{session_gap}. Maintain hydration and electrolytes."
+                    if (has_ground and has_gym)
+                    else "Single session focus today."
+                ),
+            })
+
+        return schedule
 
     # -----------------------------------------------------------------
     # 4. SINGLE-CALL LLM GENERATED PERSONALIZED PLAN

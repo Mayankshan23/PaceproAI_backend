@@ -13,7 +13,23 @@ Evaluates 5 critical fast-bowling physical links:
 """
 
 from typing import Dict, Any, List, Optional
+import json
+import logging
 import math
+
+logger = logging.getLogger("pacepro.strength")
+
+try:
+    from llm_analyzer import LLMClient, LLMUnavailableError
+except ImportError:
+    class LLMUnavailableError(Exception):
+        pass
+
+    class LLMClient:
+        def generate_json(self, system_prompt: str, user_prompt: str):
+            raise LLMUnavailableError("LLM not available")
+        def generate_text(self, system_prompt: str, user_prompt: str):
+            raise LLMUnavailableError("LLM not available")
 
 
 class StrengthDiagnosticsEngine:
@@ -21,6 +37,9 @@ class StrengthDiagnosticsEngine:
     Evaluates fast bowler physical test benchmarks and diagnoses specific
     muscular and kinetic chain vulnerabilities with customized corrective protocols.
     """
+
+    def __init__(self, llm_client: Optional[Any] = None):
+        self.llm_client = llm_client or LLMClient()
 
     def analyze_bowler_strength(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -183,6 +202,14 @@ class StrengthDiagnosticsEngine:
         # Generate Tailored Corrective Routine
         corrective_routine = self._build_corrective_routine(primary_weakness["id"], track, bowling_arm)
 
+        # Generate AI Coach Strength Diagnosis using LLM
+        ai_coach_diagnosis = self.generate_ai_strength_assessment(
+            athlete_data=data,
+            overall_score=overall_kinetic_index,
+            primary_weakness=primary_weakness,
+            chains=chains
+        )
+
         return {
             "kinetic_chain_score": overall_kinetic_index,
             "overall_rating": (
@@ -207,7 +234,76 @@ class StrengthDiagnosticsEngine:
             } if secondary_weakness and secondary_weakness["score"] < 75 else None,
             "all_muscle_chains": chains,
             "injury_risk_advisory": self._build_injury_advisory(primary_weakness["id"]),
-            "corrective_workout_routine": corrective_routine
+            "corrective_workout_routine": corrective_routine,
+            "ai_coach_diagnosis": ai_coach_diagnosis
+        }
+
+    def generate_ai_strength_assessment(
+        self,
+        athlete_data: Dict[str, Any],
+        overall_score: float,
+        primary_weakness: Dict[str, Any],
+        chains: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Uses LLM to produce an authoritative, high-performance coaching diagnosis
+        based on the athlete's actual strength test metrics.
+        """
+        weight = float(athlete_data.get("weight_kg", 68.0))
+        age = int(athlete_data.get("age", 20))
+        track = str(athlete_data.get("strength_track", "gym_lifting"))
+        bowling_arm = str(athlete_data.get("bowling_arm", "Right-Arm Fast"))
+        speed = float(athlete_data.get("bowling_speed_kph", 132.0))
+        niggle = str(athlete_data.get("reported_niggle", "none"))
+
+        chain_summary = ", ".join(f"{c['name']}: {c['score']}/100" for c in chains)
+
+        system_prompt = (
+            "You are PacePro AI's Chief Strength & Conditioning Coach for fast bowlers.\n"
+            "Analyze the athlete's physical testing benchmarks and deliver an elite, sports-science coaching evaluation.\n"
+            "Rules:\n"
+            "1. Reference their actual scores and test numbers (e.g. wall sit, deadlift, split squat, pull-ups).\n"
+            "2. Explain the kinetic link to ball release speed and lower back / knee protection.\n"
+            "3. Respond ONLY with a valid JSON object matching this schema, no markdown fences:\n"
+            "{\n"
+            '  "coach_verdict": "2-3 sentence executive evaluation.",\n'
+            '  "kinetic_breakdown": "Explanation of how this primary weakness impacts delivery crease deceleration.",\n'
+            '  "prescribed_focus": ["Actionable focus point 1", "Actionable focus point 2"],\n'
+            '  "weekly_priority": "Single top priority cue for the next 4 weeks."\n'
+            "}"
+        )
+
+        user_prompt = (
+            f"Bowler: {age}yo ({weight}kg), {bowling_arm}, Target Speed: {speed} km/h, Track: {track}, Niggle: {niggle}.\n"
+            f"Overall Kinetic Chain Score: {overall_score}/100.\n"
+            f"Scores: {chain_summary}.\n"
+            f"Primary Weakness: {primary_weakness['name']} (Score: {primary_weakness['score']}/100, Muscles: {primary_weakness['muscles']})."
+        )
+
+        try:
+            parsed = self.llm_client.generate_json(system_prompt, user_prompt)
+            if isinstance(parsed, dict) and "coach_verdict" in parsed:
+                parsed["_status"] = "ok"
+                return parsed
+        except Exception as e:
+            logger.warning(f"[StrengthDiagnostics] LLM assessment unavailable, using deterministic fallback: {e}")
+
+        return {
+            "_status": "fallback",
+            "coach_verdict": (
+                f"Your overall kinetic durability scored {overall_score}/100. "
+                f"Your primary limiter is {primary_weakness['name']} ({primary_weakness['score']}/100), "
+                f"which directly influences your delivery stride firmness."
+            ),
+            "kinetic_breakdown": (
+                f"Weakness in {primary_weakness['muscles']} leads to kinetic energy dissipation at foot strike, "
+                f"reducing transfer into ball velocity and increasing stress on surrounding joints."
+            ),
+            "prescribed_focus": [
+                f"Prioritize targeted corrective exercises 3x per week for {primary_weakness['name']}.",
+                "Pair isometric holds with compound multi-joint movements to build muscular armor."
+            ],
+            "weekly_priority": f"Strengthen {primary_weakness['muscles']} to solidify front-foot plant stiffness."
         }
 
     def _build_injury_advisory(self, weakness_id: str) -> Dict[str, str]:

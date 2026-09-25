@@ -133,15 +133,41 @@ class ViewFusion:
             definition = measurement.get("definition")
             rel_score = result.get("reliability_score", 0.7)
 
-            if val is not None and conf:
-                candidates.append((view_name, val, unit, conf, rel_score, event, definition))
+            if val is not None:
                 candidates_by_view[view_name] = val
-            elif val is not None:
-                # Value present but low confidence
-                candidates_by_view[view_name] = val
+                if conf:
+                    candidates.append((view_name, val, unit, conf, rel_score, event, definition))
 
         preference_order = config.MEASUREMENT_VIEW_PREFERENCE.get(name, ["side1", "side2", "front"])
         tolerance = getattr(config, "FUSION_AGREEMENT_TOLERANCE_DEG", 8.0)
+
+        # Fallback to any available measurement across views if confident candidate list is empty
+        if not candidates and candidates_by_view:
+            for pref_v in preference_order:
+                if pref_v in candidates_by_view and candidates_by_view[pref_v] is not None:
+                    res_m = usable_views[pref_v].get("measurements", {}).get(name, {})
+                    candidates.append((
+                        pref_v,
+                        candidates_by_view[pref_v],
+                        res_m.get("unit"),
+                        False,
+                        0.30,
+                        res_m.get("event"),
+                        res_m.get("definition")
+                    ))
+                    break
+            if not candidates:
+                first_v = next(iter(candidates_by_view.keys()))
+                res_m = usable_views[first_v].get("measurements", {}).get(name, {})
+                candidates.append((
+                    first_v,
+                    candidates_by_view[first_v],
+                    res_m.get("unit"),
+                    False,
+                    0.30,
+                    res_m.get("event"),
+                    res_m.get("definition")
+                ))
 
         # Event & Definition metadata from first available
         event_name = candidates[0][5] if candidates else None
