@@ -878,7 +878,8 @@ class PlannerService:
             weekly_overs=weekly_overs,
             ground_days=ground_days,
             gym_days=gym_days,
-            max_overs_days=max_overs_days
+            max_overs_days=max_overs_days,
+            language=str(athlete_profile.get("language", "hinglish")).lower().strip()
         )
 
     def _build_fallback_coaching_assessment(
@@ -899,62 +900,118 @@ class PlannerService:
         weekly_overs: int,
         ground_days: int,
         gym_days: int,
-        max_overs_days: int
+        max_overs_days: int,
+        language: str = "hinglish"
     ) -> Dict[str, Any]:
         is_veg = "veg" in food_pref.lower() and "non" not in food_pref.lower()
+        is_hinglish = (language or "hinglish").lower().strip() == "hinglish"
         
-        # Athletic Baseline & Positive Insights
-        if 18.5 <= bmi <= 24.9:
-            bmi_text = f"Optimal athletic BMI ({bmi} kg/m²) — solid lean foundation and healthy power-to-weight ratio for explosive run-up acceleration without excess joint load."
-        elif bmi < 18.5:
-            bmi_text = f"Agile athletic frame (BMI {bmi} kg/m²) — high baseline mobility; planned caloric surplus will convert directly into fast-bowling lean power."
+        if is_hinglish:
+            # Athletic Baseline & Positive Insights (Hinglish)
+            if 18.5 <= bmi <= 24.9:
+                bmi_text = f"Optimal athletic BMI ({bmi} kg/m²) — solid lean foundation aur healthy power-to-weight ratio, jo explosive run-up speed deta hai bina joints pe extra load daale."
+            elif bmi < 18.5:
+                bmi_text = f"Agile athletic frame (BMI {bmi} kg/m²) — high baseline mobility; planned caloric surplus seedhe fast-bowling lean power me convert hogi."
+            else:
+                bmi_text = f"Robust athletic mass (BMI {bmi} kg/m²) — solid mass foundation; strength training is weight ko high ball release velocity me harness karegi."
+
+            positives = [
+                bmi_text,
+                f"Well-structured training split: gym strength conditioning ({gym_days} din) aur ground bowling ({ground_days} din) ke beech balanced distribution.",
+                f"Calibrated ACWR workload ({acwr}) safe adaptation zone me hai ('{acwr_status}'), jo bowling stamina maintain karta hai aur safe recovery buffer deta hai."
+            ]
+
+            current_lacks = [
+                f"Intra-session glycogen deficit: Dual ground/gym days me ~{round(tdee * 0.4)} kcal burn hoti hain; bowling spell se 45 min pehle fast carbs na lene se aakhiri overs me pace gir sakti hai.",
+                f"Protein distribution gap: {food_pref} athlete hone ke naate {protein_g}g protein ko 4-5 spaced meals me baantein taaki muscle repair fast ho." if is_veg else f"Hydration & mineral deficit: High bowling volume ({weekly_overs} overs) me 1.5–2L sweat nikalta hai; sodium/potassium hydration cramping rokne ke liye zaroori hai.",
+                f"Spinal shear risk: {max_overs_days} max-overs spells ke beech kam se kam 48 hours ka buffer zaroor rakhein."
+            ]
+
+            required_needs = {
+                "daily_calories": f"{target_cals} kcal bowling days pe (+350 kcal tendon regeneration surplus); rest days pe ~{max(2200, target_cals - 450)} kcal rakhein.",
+                "protein_target": f"{protein_g}g daily (2.2g per kg bodyweight). Bowling session ke 30 min ke andar 30-35g protein fast carbs ke saath lein.",
+                "carbs_and_fueling": f"{carbs_g}g complex carbs (oats, brown rice, sweet potatoes) muscle glycogen reserves saturate rakhne ke liye.",
+                "recovery_and_joint_care": f"{(weight * 0.05):.1f} - {(weight * 0.06):.1f} Liters electrolyte water daily, plus Calcium aur Vitamin D3 lumbar disc aur bone density ke liye."
+            }
+
+            goal_clean = goal.replace("_", " ").lower()
+            if "speed" in goal_clean or "pace" in goal_clean or "performance" in goal_clean:
+                directives = [
+                    "1. Pre-Spell Priming: Bowling se 45 min pehle 40-50g fast carbs (kela + honey toast ya energy drink) lein taaki 5–8 overs me kinetic pace bani rahe.",
+                    "2. Front Knee Brace Stiffness: 18° knee plant ke baad post-bowling isometric wall sits (3x60s) aur high-leucine recovery shake lein.",
+                    "3. 48-Hour Spell Gap: Max-overs bowling spells ke beech 48 ghante ka gap zaroor rakhein taaki ACWR 1.35 se kam rahe aur lower back safe rahe.",
+                    "4. Sleep Recovery: Roz 8.5 ghante ki continuous neend lein—deep slow-wave sleep me hi muscle recovery aur repair hoti hai."
+                ]
+                summary = f"Aapka metabolic engine explosive pace ke liye set hai. Match spells se pehle carb fueling aur bowling spells ke beech 48h ka recovery buffer priority rakhein taaki kamar safe rahe aur ball speed tez nikle."
+            elif "muscle" in goal_clean or "hypertrophy" in goal_clean:
+                directives = [
+                    f"1. Progressive Caloric Surplus: Hafte ke 7 din {target_cals} kcal maintain karein taaki bina bowling mobility khoe muscle mass build ho sake.",
+                    "2. Spaced Protein Cadence: Har 3.5 ghante me 35g protein lein 24-hour muscle protein synthesis ke liye.",
+                    "3. Compound Loading: Heavy compound lifts (Trap Bar Deadlifts, Front Squats) non-bowling days pe karein.",
+                    "4. Creatine Saturation: Roz 3-5g Creatine Monohydrate lein explosive run-up force badhane ke liye."
+                ]
+                summary = f"Aapka {target_cals} kcal aur {protein_g}g protein ka surplus robust athletic armor banayega jo bowling delivery impacts ko jhel sake."
+            else:
+                directives = [
+                    f"1. Energy Equilibrium: {target_cals} kcal maintain karein lean power-to-weight ratio ke liye.",
+                    f"2. High Protein Satiety: Roz {protein_g}g protein lein lean muscle bachane ke liye.",
+                    "3. Hydration Electrolytes: Bowling spells ke dauran kam se kam 3.5L electrolyte water piyein.",
+                    "4. Active Recovery Protocols: Rest days pe foam rolling aur hamstring mobility karein."
+                ]
+                summary = f"High kinetic output aur body composition optimize karne ke liye balanced plan."
         else:
-            bmi_text = f"Robust athletic mass (BMI {bmi} kg/m²) — excellent momentum foundation; strength training will harness this mass for high ball release velocity."
+            # Athletic Baseline & Positive Insights (English)
+            if 18.5 <= bmi <= 24.9:
+                bmi_text = f"Optimal athletic BMI ({bmi} kg/m²) — solid lean foundation and healthy power-to-weight ratio for explosive run-up acceleration without excess joint load."
+            elif bmi < 18.5:
+                bmi_text = f"Agile athletic frame (BMI {bmi} kg/m²) — high baseline mobility; planned caloric surplus will convert directly into fast-bowling lean power."
+            else:
+                bmi_text = f"Robust athletic mass (BMI {bmi} kg/m²) — excellent momentum foundation; strength training will harness this mass for high ball release velocity."
 
-        positives = [
-            bmi_text,
-            f"Well-structured training split: balanced ~4–5 hours weekly distribution between gym strength conditioning ({gym_days} days) and explosive ground bowling ({ground_days} days).",
-            f"Calibrated ACWR workload ({acwr}) in the '{acwr_status}', maintaining peak match-over conditioning while ensuring safe recovery intervals between bowling spells."
-        ]
-
-        current_lacks = [
-            f"Intra-session glycogen deficit: Dual ground/gym days burn ~{round(tdee * 0.4)} kcal in 3 hours; failing to intake fast carbs 45 min pre-spell leads to late-spell velocity drop.",
-            f"Protein distribution gap: As a {food_pref} athlete, you need 3.0g of leucine per feeding; ensure your {protein_g}g is evenly distributed across 4-5 spaced meals rather than 2 large ones." if is_veg else f"Hydration & mineral deficit: High bowling volume ({weekly_overs} overs) expels 1.5–2L sweat; sodium/potassium replacement is critical to prevent quad/calf cramping.",
-            f"Spinal shear risk on high-intensity days: {max_overs_days} max-overs spells generate ground reaction forces up to 8–9x bodyweight on the front leg brace."
-        ]
-
-        required_needs = {
-            "daily_calories": f"{target_cals} kcal on bowling days (+350 kcal surplus for tendon regeneration); scale back to ~{max(2200, target_cals - 450)} kcal on full rest days.",
-            "protein_target": f"{protein_g}g daily (2.2g per kg of bodyweight). Consume 30-35g within 30 minutes post-session with fast-acting carbohydrates.",
-            "carbs_and_fueling": f"{carbs_g}g complex carbs (oats, brown basmati rice, sweet potatoes) to keep muscle glycogen reserves saturated before match spells.",
-            "recovery_and_joint_care": f"{(weight * 0.05):.1f} - {(weight * 0.06):.1f} Liters of electrolyte water daily, plus 1000mg Calcium & 2000 IU Vitamin D3 for lumbar disc and tibia bone density."
-        }
-
-        goal_clean = goal.replace("_", " ").lower()
-        if "speed" in goal_clean or "pace" in goal_clean or "performance" in goal_clean:
-            directives = [
-                "1. Pre-Spell Priming: Ingest 40-50g fast carbohydrates (banana + honey toast or isotonic drink) 45 min before bowling to maximize kinetic power output in overs 5–8.",
-                "2. Front Knee Brace Stiffness: Pair your 18° knee plant with post-bowling isometric wall sits (3x60s) and a high-leucine recovery shake within 30 min.",
-                "3. 48-Hour Spell Spacing: Strictly maintain at least 48 hours between your max-overs spells to keep ACWR below 1.35 and prevent lumbar stress reactions.",
-                "4. Sleep Architecture: Target 8.5 hours of uninterrupted sleep nightly—peak testosterone and growth hormone spikes occur during deep slow-wave sleep."
+            positives = [
+                bmi_text,
+                f"Well-structured training split: balanced ~4–5 hours weekly distribution between gym strength conditioning ({gym_days} days) and explosive ground bowling ({ground_days} days).",
+                f"Calibrated ACWR workload ({acwr}) in the '{acwr_status}', maintaining peak match-over conditioning while ensuring safe recovery intervals between bowling spells."
             ]
-            summary = f"Your metabolic engine is calibrated for explosive pace. Prioritize pre-spell glycogen saturation and strict 48h spell intervals to hit top velocity while protecting your lower back."
-        elif "muscle" in goal_clean or "hypertrophy" in goal_clean:
-            directives = [
-                f"1. Progressive Caloric Surplus: Maintain {target_cals} kcal consistently across all 7 days to fuel hypertrophy without compromising bowling mobility.",
-                "2. Hyper-aminoacidemia Cadence: Consume 35g protein every 3.5 hours to maximize 24-hour muscle protein synthesis (MPS).",
-                "3. Compound Loading: Schedule heavy compound lifts (Trap Bar Deadlifts, Front Squats) on non-bowling days with a 7-8 hour gap from ground work.",
-                "4. Creatine Saturation: Supplement 3-5g Creatine Monohydrate daily to increase intramuscular phosphocreatine and explosive run-up force."
+
+            current_lacks = [
+                f"Intra-session glycogen deficit: Dual ground/gym days burn ~{round(tdee * 0.4)} kcal in 3 hours; failing to intake fast carbs 45 min pre-spell leads to late-spell velocity drop.",
+                f"Protein distribution gap: As a {food_pref} athlete, you need 3.0g of leucine per feeding; ensure your {protein_g}g is evenly distributed across 4-5 spaced meals rather than 2 large ones." if is_veg else f"Hydration & mineral deficit: High bowling volume ({weekly_overs} overs) expels 1.5–2L sweat; sodium/potassium replacement is critical to prevent quad/calf cramping.",
+                f"Spinal shear risk on high-intensity days: {max_overs_days} max-overs spells generate ground reaction forces up to 8–9x bodyweight on the front leg brace."
             ]
-            summary = f"Your surplus of {target_cals} kcal and {protein_g}g protein will build robust athletic armor to withstand repetitive bowling delivery impacts."
-        else:
-            directives = [
-                f"1. Energy Equilibrium: Target {target_cals} kcal to maintain lean power-to-weight ratio for swift run-up acceleration.",
-                f"2. High Protein Satiety: Hit {protein_g}g protein daily to safeguard lean muscle mass while metabolizing excess adipose tissue.",
-                "3. Hydration Electrolytes: Drink at least 3.5L of water supplemented with electrolytes during bowling spells.",
-                "4. Active Recovery Protocols: Incorporate foam rolling, hamstring mobility, and contrast showers on rest days."
-            ]
-            summary = f"Balanced protocol tailored to sustain high kinetic output, optimize body composition, and maintain spinal resilience."
+
+            required_needs = {
+                "daily_calories": f"{target_cals} kcal on bowling days (+350 kcal surplus for tendon regeneration); scale back to ~{max(2200, target_cals - 450)} kcal on full rest days.",
+                "protein_target": f"{protein_g}g daily (2.2g per kg of bodyweight). Consume 30-35g within 30 minutes post-session with fast-acting carbohydrates.",
+                "carbs_and_fueling": f"{carbs_g}g complex carbs (oats, brown basmati rice, sweet potatoes) to keep muscle glycogen reserves saturated before match spells.",
+                "recovery_and_joint_care": f"{(weight * 0.05):.1f} - {(weight * 0.06):.1f} Liters of electrolyte water daily, plus 1000mg Calcium & 2000 IU Vitamin D3 for lumbar disc and tibia bone density."
+            }
+
+            goal_clean = goal.replace("_", " ").lower()
+            if "speed" in goal_clean or "pace" in goal_clean or "performance" in goal_clean:
+                directives = [
+                    "1. Pre-Spell Priming: Ingest 40-50g fast carbohydrates (banana + honey toast or isotonic drink) 45 min before bowling to maximize kinetic power output in overs 5–8.",
+                    "2. Front Knee Brace Stiffness: Pair your 18° knee plant with post-bowling isometric wall sits (3x60s) and a high-leucine recovery shake within 30 min.",
+                    "3. 48-Hour Spell Spacing: Strictly maintain at least 48 hours between your max-overs spells to keep ACWR below 1.35 and prevent lumbar stress reactions.",
+                    "4. Sleep Architecture: Target 8.5 hours of uninterrupted sleep nightly—peak testosterone and growth hormone spikes occur during deep slow-wave sleep."
+                ]
+                summary = f"Your metabolic engine is calibrated for explosive pace. Prioritize pre-spell glycogen saturation and strict 48h spell intervals to hit top velocity while protecting your lower back."
+            elif "muscle" in goal_clean or "hypertrophy" in goal_clean:
+                directives = [
+                    f"1. Progressive Caloric Surplus: Maintain {target_cals} kcal consistently across all 7 days to fuel hypertrophy without compromising bowling mobility.",
+                    "2. Hyper-aminoacidemia Cadence: Consume 35g protein every 3.5 hours to maximize 24-hour muscle protein synthesis (MPS).",
+                    "3. Compound Loading: Schedule heavy compound lifts (Trap Bar Deadlifts, Front Squats) on non-bowling days with a 7-8 hour gap from ground work.",
+                    "4. Creatine Saturation: Supplement 3-5g Creatine Monohydrate daily to increase intramuscular phosphocreatine and explosive run-up force."
+                ]
+                summary = f"Your surplus of {target_cals} kcal and {protein_g}g protein will build robust athletic armor to withstand repetitive bowling delivery impacts."
+            else:
+                directives = [
+                    f"1. Energy Equilibrium: Target {target_cals} kcal to maintain lean power-to-weight ratio for swift run-up acceleration.",
+                    f"2. High Protein Satiety: Hit {protein_g}g protein daily to safeguard lean muscle mass while metabolizing excess adipose tissue.",
+                    "3. Hydration Electrolytes: Drink at least 3.5L of water supplemented with electrolytes during bowling spells.",
+                    "4. Active Recovery Protocols: Incorporate foam rolling, hamstring mobility, and contrast showers on rest days."
+                ]
+                summary = f"Balanced protocol tailored to sustain high kinetic output, optimize body composition, and maintain spinal resilience."
 
         return {
             "source": "sports_science_engine",
@@ -1449,6 +1506,7 @@ class PlannerService:
                 "weekly_bowling_days": weekly_bowling_days,
                 "max_overs_per_spell": max_overs_per_spell,
                 "avg_overs_per_session": avg_overs_per_session,
+                "language": payload.get("language", "hinglish"),
             },
             nutrition_metrics={
                 "bmr": calculated_bmr,

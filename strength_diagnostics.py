@@ -288,6 +288,26 @@ class StrengthDiagnosticsEngine:
         except Exception as e:
             logger.warning(f"[StrengthDiagnostics] LLM assessment unavailable, using deterministic fallback: {e}")
 
+        lang = str(athlete_data.get("language", "hinglish")).lower().strip()
+        if lang == "hinglish":
+            return {
+                "_status": "fallback",
+                "coach_verdict": (
+                    f"Aapka overall kinetic durability score {overall_score}/100 aaya hai. "
+                    f"Aapka primary limiter {primary_weakness['name']} ({primary_weakness['score']}/100) hai, "
+                    f"jo delivery stride me front-foot plant aur ball release speed ko directly affect karta hai."
+                ),
+                "kinetic_breakdown": (
+                    f"{primary_weakness['muscles']} me weakness hone ki wajah se foot strike pe ground reaction force leak hoti hai, "
+                    f"jisse ball pace kam hoti hai aur knee/lower back par extra stress aata hai."
+                ),
+                "prescribed_focus": [
+                    f"Hafte me 3 din {primary_weakness['name']} ke targeted corrective drills karein.",
+                    "Isometric wall sits aur compound exercises pair karke muscular armor build karein."
+                ],
+                "weekly_priority": f"{primary_weakness['muscles']} ko mazboot karke delivery stride me front-leg stiffness solidify karein."
+            }
+
         return {
             "_status": "fallback",
             "coach_verdict": (

@@ -174,8 +174,9 @@ def evaluate_metric_status(metric_key: str, val):
     return "optimal"
 
 
-def generate_fallback_coaching_report(measurements: Dict[str, Any], bowling_arm: str = "right"):
-    """Generates an intelligent, encouraging, and positively framed biomechanical feedback report."""
+def generate_fallback_coaching_report(measurements: Dict[str, Any], bowling_arm: str = "right", language: str = "hinglish"):
+    """Generates an intelligent, encouraging, and positively framed biomechanical feedback report in Hinglish or English."""
+    is_hinglish = (language or "hinglish").lower().strip() == "hinglish"
     brace_val = measurements.get("front_knee_brace_change", {}).get("fused", 18.0)
     back_knee = measurements.get("back_knee_flexion_at_bfc", {}).get("fused", 154.0)
     elbow_ext = measurements.get("release_elbow_extension", {}).get("fused", 169.0)
@@ -187,54 +188,104 @@ def generate_fallback_coaching_report(measurements: Dict[str, Any], bowling_arm:
     opportunities = []
     recommendations = []
 
-    if isinstance(brace_val, (int, float)) and brace_val >= 14:
-        score += 4
-        strengths.append(f"Outstanding lead leg firmness ({brace_val}° retention) acts as a powerful catapult fulcrum, transferring ground reaction force straight into release pace.")
+    if is_hinglish:
+        if isinstance(brace_val, (int, float)) and brace_val >= 14:
+            score += 4
+            strengths.append(f"Outstanding lead leg firmness ({brace_val}° retention): delivery stride me front-foot plant solid catapult lever ka kaam karta hai, jo ground reaction force ko release speed me whip karta hai.")
+        else:
+            score -= 2
+            opportunities.append(f"Prime Pace Opportunity (+3–5 km/h): Front knee brace ({brace_val}° plant) ko firm lock karne se run-up ka pura momentum seedhe extra ball speed me convert hoga!")
+            recommendations.append("Lead-leg stiffness build karne ke liye single-leg landing block holds aur wall lockout drills karein.")
+
+        if isinstance(back_knee, (int, float)) and back_knee >= 150:
+            score += 3
+            strengths.append(f"Back Foot Contact pe tall aur springy gather ({back_knee}°) run-up speed ko delivery stride me smoothly carry karta hai.")
+        else:
+            opportunities.append(f"Gather Flow Cue: Back foot plant ({back_knee}°) pe tall aur springy gather maintain karein taaki approach velocity bani rahe.")
+            recommendations.append("Tall aur rhythmic back-leg gather ke liye bound-and-drive approach drills karein.")
+
+        if isinstance(elbow_ext, (int, float)) and elbow_ext >= 165:
+            strengths.append(f"Bowling arm ka clean extension ({elbow_ext}°) pitch pe steep downward bounce aur carry banata hai.")
+        else:
+            opportunities.append(f"High-Wheel Arc Focus: Bowling arm ka lamba sweep ({elbow_ext}°) effortless whip aur consistent upright seam presentation deta hai.")
+            recommendations.append("Towel whipping drills aur high release target practice karein.")
+
+        if isinstance(arm_slot_val, (int, float)) and arm_slot_val >= 65:
+            strengths.append(f"High-arm release angle ({arm_slot_val}°) steep bounce aur unplayable upright seam provide karta hai.")
+        else:
+            strengths.append(f"Three-quarter arm angle ({arm_slot_val}°) late swing aur pitch se skid generate karta hai.")
+
+        if isinstance(trunk_lean, (int, float)) and trunk_lean > 15:
+            opportunities.append(f"Upright Drive Cue: Delivery stride me chest ko stumps ki taraf sidha drive karein ({trunk_lean}° tilt), jisse extra zip milegi aur kamar safe rahegi.")
+            recommendations.append("Standing medicine ball chest throws (3 sets x 8 reps) aur core rotational stability exercises karein.")
+        else:
+            strengths.append("Upright thoracic drive spinal strain ko kam rakhta hai, keeping your back fresh for long spells.")
+
+        recommendations.append("Repeatable delivery rhythm ke liye approach cadence run-up drills follow karein.")
+
+        grade = "A (Elite High-Performance Action)" if score >= 88 else "A- (Strong Kinetic Foundation)" if score >= 80 else "B+ (High-Potential Fast Bowler)"
+
+        return {
+            "overall_score": min(score, 96),
+            "grade": grade,
+            "priority_improvement": "Front-foot strike pe chest ko target ki taraf tall drive karte rahein, jisse natural run-up momentum explosive release velocity (+3–5 km/h) me convert ho sake!",
+            "what_you_are_doing_well": strengths,
+            "technical_issues": opportunities if opportunities else ["Front leg lockout ke saath arm delivery sweep sync karein effortless whip ke liye."],
+            "coaching_recommendations": recommendations,
+            "questions_to_discuss_with_coach": [
+                "Run-up cadence ko front-foot plant ke spring ke saath kaise sync karein?",
+                "Match days pe consistent upright seam ke liye release wrist ke key cues kya hain?"
+            ]
+        }
     else:
-        score -= 2
-        opportunities.append(f"Prime Pace Opportunity (+3–5 km/h): Firming up your lead knee brace ({brace_val}° plant) will turn all your run-up power directly into extra ball speed!")
-        recommendations.append("Perform single-leg landing block holds and wall lockouts to build solid lead leg stiffness.")
+        if isinstance(brace_val, (int, float)) and brace_val >= 14:
+            score += 4
+            strengths.append(f"Outstanding lead leg firmness ({brace_val}° retention) acts as a powerful catapult fulcrum, transferring ground reaction force straight into release pace.")
+        else:
+            score -= 2
+            opportunities.append(f"Prime Pace Opportunity (+3–5 km/h): Firming up your lead knee brace ({brace_val}° plant) will turn all your run-up power directly into extra ball speed!")
+            recommendations.append("Perform single-leg landing block holds and wall lockouts to build solid lead leg stiffness.")
 
-    if isinstance(back_knee, (int, float)) and back_knee >= 150:
-        score += 3
-        strengths.append(f"Tall springy gather at Back Foot Contact ({back_knee}°) smoothly carries run-up momentum into the delivery stride.")
-    else:
-        opportunities.append(f"Gather Flow Cue: Focusing on staying tall and springy on your back foot plant ({back_knee}°) will preserve full approach velocity.")
-        recommendations.append("Bound-and-drive approach drills with cones to build a tall, rhythmic back-leg gather.")
+        if isinstance(back_knee, (int, float)) and back_knee >= 150:
+            score += 3
+            strengths.append(f"Tall springy gather at Back Foot Contact ({back_knee}°) smoothly carries run-up momentum into the delivery stride.")
+        else:
+            opportunities.append(f"Gather Flow Cue: Focusing on staying tall and springy on your back foot plant ({back_knee}°) will preserve full approach velocity.")
+            recommendations.append("Bound-and-drive approach drills with cones to build a tall, rhythmic back-leg gather.")
 
-    if isinstance(elbow_ext, (int, float)) and elbow_ext >= 165:
-        strengths.append(f"Clean, fluid bowling arm extension ({elbow_ext}°) produces natural bounce and steep downward carry.")
-    else:
-        opportunities.append(f"High-Wheel Arc Focus: A long, relaxed bowling arm sweep ({elbow_ext}°) gives effortless whip and seam presentation.")
-        recommendations.append("Towel whipping drills and high release arc target practice.")
+        if isinstance(elbow_ext, (int, float)) and elbow_ext >= 165:
+            strengths.append(f"Clean, fluid bowling arm extension ({elbow_ext}°) produces natural bounce and steep downward carry.")
+        else:
+            opportunities.append(f"High-Wheel Arc Focus: A long, relaxed bowling arm sweep ({elbow_ext}°) gives effortless whip and seam presentation.")
+            recommendations.append("Towel whipping drills and high release arc target practice.")
 
-    if isinstance(arm_slot_val, (int, float)) and arm_slot_val >= 65:
-        strengths.append(f"High-arm release elevation ({arm_slot_val}°) maximizes steep bounce and upright seam presentation.")
-    else:
-        strengths.append(f"Natural three-quarter arm slot ({arm_slot_val}°) generates late swing and skid through the air.")
+        if isinstance(arm_slot_val, (int, float)) and arm_slot_val >= 65:
+            strengths.append(f"High-arm release elevation ({arm_slot_val}°) maximizes steep bounce and upright seam presentation.")
+        else:
+            strengths.append(f"Natural three-quarter arm slot ({arm_slot_val}°) generates late swing and skid through the air.")
 
-    if isinstance(trunk_lean, (int, float)) and trunk_lean > 15:
-        opportunities.append(f"Upright Drive Cue: Driving your chest straight toward the target ({trunk_lean}° tilt) channels all your momentum directly at the stumps.")
-        recommendations.append("Standing medicine ball chest throws (3 sets x 8 reps) and core rotational stability holds.")
-    else:
-        strengths.append("Upright thoracic drive minimizes rotation strain, keeping your back fresh for long match spells.")
+        if isinstance(trunk_lean, (int, float)) and trunk_lean > 15:
+            opportunities.append(f"Upright Drive Cue: Driving your chest straight toward the target ({trunk_lean}° tilt) channels all your momentum directly at the stumps.")
+            recommendations.append("Standing medicine ball chest throws (3 sets x 8 reps) and core rotational stability holds.")
+        else:
+            strengths.append("Upright thoracic drive minimizes rotation strain, keeping your back fresh for long match spells.")
 
-    recommendations.append("Approach cadence run-up drills to groove a repeatable, effortless delivery rhythm.")
+        recommendations.append("Approach cadence run-up drills to groove a repeatable, effortless delivery rhythm.")
 
-    grade = "A (Elite High-Performance Action)" if score >= 88 else "A- (Strong Kinetic Foundation)" if score >= 80 else "B+ (High-Potential Fast Bowler)"
+        grade = "A (Elite High-Performance Action)" if score >= 88 else "A- (Strong Kinetic Foundation)" if score >= 80 else "B+ (High-Potential Fast Bowler)"
 
-    return {
-        "overall_score": min(score, 96),
-        "grade": grade,
-        "priority_improvement": "Keep driving your chest tall toward the target at front-foot strike to convert your natural approach momentum into explosive release velocity.",
-        "what_you_are_doing_well": strengths,
-        "technical_issues": opportunities if opportunities else ["Sync arm delivery sweep with peak front leg lockout for effortless whip."],
-        "coaching_recommendations": recommendations,
-        "questions_to_discuss_with_coach": [
-            "How can we groove the run-up cadence to hit the front-foot plant with maximum spring?",
-            "Which release wrist cues give the most consistent upright seam on match days?"
-        ]
-    }
+        return {
+            "overall_score": min(score, 96),
+            "grade": grade,
+            "priority_improvement": "Keep driving your chest tall toward the target at front-foot strike to convert your natural approach momentum into explosive release velocity.",
+            "what_you_are_doing_well": strengths,
+            "technical_issues": opportunities if opportunities else ["Sync arm delivery sweep with peak front leg lockout for effortless whip."],
+            "coaching_recommendations": recommendations,
+            "questions_to_discuss_with_coach": [
+                "How can we groove the run-up cadence to hit the front-foot plant with maximum spring?",
+                "Which release wrist cues give the most consistent upright seam on match days?"
+            ]
+        }
 
 
 @app.post("/api/analyze-bowling")
@@ -245,6 +296,7 @@ async def analyze_bowling_api(
     bowling_arm: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None),
     athlete_name: Optional[str] = Form(None),
+    language: Optional[str] = Form("hinglish"),
 ):
     """
     Accepts video files for Front, Side 1, and Side 2 camera angles.
@@ -367,8 +419,9 @@ async def analyze_bowling_api(
             bowling_arm_str = str(bowling_arm) if bowling_arm else "right"
 
         llm_report = raw_result.get("llm_report")
+        lang_choice = (language or "hinglish").lower().strip()
         if not llm_report or llm_report.get("_status") == "unavailable":
-            llm_report = generate_fallback_coaching_report(formatted_measurements, bowling_arm_str)
+            llm_report = generate_fallback_coaching_report(formatted_measurements, bowling_arm_str, language=lang_choice)
         else:
             # Map fields if LLM used alternative key names
             if "strengths" in llm_report and "what_you_are_doing_well" not in llm_report:
@@ -436,8 +489,8 @@ async def analyze_bowling_api(
             "llm_report": llm_report
         }
 
-        # Auto-persist analysis record and history item to MongoDB
-        if db_manager.is_connected:
+        # Auto-persist analysis record and history item (Local Store + MongoDB)
+        try:
             uid = user_id or "default_athlete"
             db_record = {k: v for k, v in final_res.items()}
             db_record["user_id"] = uid
@@ -451,6 +504,8 @@ async def analyze_bowling_api(
                 "status": "Completed",
                 "detail": db_record
             }, user_id=uid, max_retained=3)
+        except Exception as save_err:
+            print(f"[Warning] Failed to auto-persist analysis record: {save_err}")
 
         return final_res
 
@@ -492,7 +547,7 @@ def generate_diet_api(req: DietPlanRequest):
     """
     try:
         result = planner_service.generate_diet_plan(req.dict())
-        if db_manager.is_connected:
+        try:
             uid = req.user_id or "default_athlete"
             db_manager.save_plan_record("diet", result, user_id=uid, max_retained=3)
             targets = result.get("daily_targets", {})
@@ -504,6 +559,8 @@ def generate_diet_api(req: DietPlanRequest):
                 "status": "Active",
                 "detail": result
             }, user_id=uid, max_retained=3)
+        except Exception as save_err:
+            print(f"[Warning] Failed to auto-persist diet plan: {save_err}")
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -522,7 +579,7 @@ def generate_combined_plan_api(payload: Dict[str, Any]):
     """
     try:
         result = planner_service.generate_combined_plan(payload)
-        if db_manager.is_connected:
+        try:
             uid = payload.get("user_id") or "default_athlete"
             db_manager.save_plan_record("combined", result, user_id=uid, max_retained=3)
             db_manager.save_history_record({
@@ -533,6 +590,8 @@ def generate_combined_plan_api(payload: Dict[str, Any]):
                 "status": "Active Protocol",
                 "detail": result
             }, user_id=uid, max_retained=3)
+        except Exception as save_err:
+            print(f"[Warning] Failed to auto-persist combined plan: {save_err}")
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -543,7 +602,7 @@ def generate_workout_api(payload: Dict[str, Any]):
     """Generates a seven-day workout schedule for the training dashboard."""
     try:
         result = planner_service.generate_workout_plan(payload)
-        if db_manager.is_connected:
+        try:
             uid = payload.get("user_id") or "default_athlete"
             db_manager.save_plan_record("workout", result, user_id=uid, max_retained=3)
             db_manager.save_history_record({
@@ -554,6 +613,8 @@ def generate_workout_api(payload: Dict[str, Any]):
                 "status": "Active",
                 "detail": result
             }, user_id=uid, max_retained=3)
+        except Exception as save_err:
+            print(f"[Warning] Failed to auto-persist workout plan: {save_err}")
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -616,8 +677,8 @@ def assess_strength_api(req: StrengthAssessmentRequest):
         data = req.dict()
         result = strength_engine.analyze_bowler_strength(data)
         
-        # Persist to MongoDB if connected
-        if db_manager.is_connected:
+        # Persist strength assessment and history
+        try:
             uid = req.user_id or "default_athlete"
             db_manager.save_plan_record("strength_assessment", result, user_id=uid, max_retained=3)
             db_manager.save_history_record({
@@ -628,6 +689,8 @@ def assess_strength_api(req: StrengthAssessmentRequest):
                 "status": result["overall_rating"],
                 "detail": result
             }, user_id=uid, max_retained=3)
+        except Exception as save_err:
+            print(f"[Warning] Failed to auto-persist strength assessment: {save_err}")
             
         return result
     except Exception as e:
